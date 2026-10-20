@@ -23,7 +23,7 @@
   { let a = 90 - SC / 2; for (let i = 0; i < 40; i++) { START.push(a); a += SPAN[i]; } }
   const ang = i => START[i] + SPAN[i] / 2;          // клетка 0 внизу, ход по часовой
 
-  const CORNER = { 0: ['СТАРТ', '+200 ₽'], 10: ['ЗИМОВЬЁ', 'в гостях'], 20: ['ЫСЫАХ', 'отдых'], 30: ['ПУРГА!', '→ в зимовьё'] };
+  const CORNER = { 0: ['СТАРТ', '+200 ₽'], 10: ['ЗИМОВЬЁ', 'в гостях'], 20: ['ЫСЫАХ', 'приз'], 30: ['ПУРГА!', '→ в зимовьё'] };
   const TOKEN_R = [140, 114, 88];                    // ряды фишек перед клеткой, внутри круга
   const TOK = 26;
   const FONT = '"PT Sans Narrow", "Roboto Condensed", "Arial Narrow", sans-serif';
@@ -137,6 +137,7 @@
       this.ready = Promise.all([svgTexture(this, 'board', buildBoardSVG(2048)), fontReady()]).then(() => {
         this.add.image(CX, CY, 'board').setDisplaySize(W, W).setDepth(0);
         this.makeLabels();
+        this.frost = this.add.graphics().setDepth(0.5);   // иней на заложенных клетках (под названиями)
         this.layer = this.add.graphics().setDepth(2);
         this.hl = this.add.graphics().setDepth(3);
         this.tweens.add({ targets: this.hl, alpha: { from: 1, to: 0.35 }, duration: 700, yoyo: true, repeat: -1 });
@@ -181,7 +182,8 @@
           const rm = low ? 214 : 250, rs = low ? 246 : 218;
           const [mx, my] = polar(rm, a), [sx, sy] = polar(rs, a);
           txt(mx, my, main, 18, rot, '#ffffff', true, chord(rm, SC) - 10);
-          txt(sx, sy, sub, 12.5, rot, '#ffffff', false, chord(rs, SC) - 10);
+          const st = txt(sx, sy, sub, 12.5, rot, '#ffffff', false, chord(rs, SC) - 10);
+          if (i === 20) { this.prizeLabel = st; this.prizeFit = chord(rs, SC) - 10; }
         }
       }
     }
@@ -189,15 +191,33 @@
     // ----- владельцы, дома, подсветка -----
     drawLayer(G) {
       const g = this.layer; g.clear();
+      const f = this.frost; f.clear();
       for (const k in G.own) {
         const i = Number(k), o = G.own[k], a = ang(i);
-        g.lineStyle(8, hex(G.players[o.owner].color), 1);
+        if (o.mortgaged) {
+          // заложенная клетка «вмёрзла»: белёсый налёт и снежинка
+          const a1 = rad(START[i] + 0.35), a2 = rad(START[i] + SPAN[i] - 0.35);
+          f.fillStyle(0xf4f8fb, 0.72);
+          f.beginPath(); f.arc(CX, CY, R.out, a1, a2, false); f.arc(CX, CY, R.inn, a2, a1, true); f.closePath(); f.fillPath();
+          const [sx, sy] = polar(R.inn + 22, a);
+          f.lineStyle(2.2, hex(C.deep), 0.9);
+          for (let k2 = 0; k2 < 3; k2++) {
+            const t = rad(k2 * 60 + a);
+            f.lineBetween(sx - 8 * Math.cos(t), sy - 8 * Math.sin(t), sx + 8 * Math.cos(t), sy + 8 * Math.sin(t));
+          }
+        }
+        g.lineStyle(8, hex(G.players[o.owner].color), o.mortgaged ? 0.4 : 1);
         g.beginPath(); g.arc(CX, CY, R.own, rad(START[i] + 0.6), rad(START[i] + SPAN[i] - 0.6), false); g.strokePath();
         if (BOARD[i].type === 'prop' && o.houses) {
           const n = o.houses;
           if (n === 5) this.quad(g, a, 318, 0, 15, 11, hex(C.coral));
           else for (let h = 0; h < n; h++) this.quad(g, a, 318, (h - (n - 1) / 2) * 1.9, 7.5, 7.5, 0xffffff);
         }
+      }
+      if (this.prizeLabel) {
+        const t = this.prizeLabel;
+        t.setScale(1).setText(G.prize ? 'приз ' + root.BAAI.engine.rub(G.prize) : 'приз');
+        if (t.width > this.prizeFit) t.setScale(this.prizeFit / t.width);
       }
       const hl = this.hl; hl.clear();
       if (G.phase !== 'over') {

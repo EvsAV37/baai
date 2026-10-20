@@ -9,10 +9,12 @@
   const T = BAAI.theme;
   const E = BAAI.engine;
   const rub = E.rub;
+  const BANK = E.BANK;
   const $ = id => document.getElementById(id);
   const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const icon = (name, color, sw) => `<svg viewBox="0 0 24 24" aria-hidden="true">${T.iconSVG(name, color, sw)}</svg>`;
   const token = (p, size) => T.tokenSVG(p.figure, p.color, size || 64).replace('<svg ', '<svg aria-hidden="true" ');
+  const laps = n => `${n} ${n === 1 ? 'круг' : n < 5 ? 'круга' : 'кругов'}`;
 
   const SAVE_KEY = 'baai.save.v2';
   const SETUP_KEY = 'baai.setup.v2';
@@ -25,6 +27,8 @@
   let shownCard = 0;
   let board = null;
   let setup = { count: 3, minutes: 0, names: [], figures: ['horse', 'deer', 'choron', 'khomus', 'bear', 'crane'] };
+  let trade = null;   // черновик обмена
+  let loan = null;    // черновик кредита
 
   // ---------- сохранение ----------
   const store = {
@@ -112,16 +116,19 @@
   }
 
   function statusHTML() {
-    const pl = G.players[G.turn];
+    const who = E.actor(G);
+    const pl = G.players[who];
     let msg = '';
     if (G.phase === 'over') msg = 'Партия окончена';
+    else if (G.phase === 'auction') msg = `Аукцион: ${BOARD[G.auction.cell].name}`;
+    else if (G.phase === 'offer') msg = G.offer.kind === 'trade' ? 'Ответ на обмен' : 'Ответ на просьбу о кредите';
     else if (G.phase === 'buy') msg = `${BOARD[G.pending.cell].name}: можно купить`;
     else if (G.phase === 'debt') msg = `Нужно заплатить ${rub(G.pending.amount)}`;
     else if (G.phase === 'roll' && pl.inJail) msg = 'Пережидает пургу в зимовье';
     else if (G.phase === 'roll' && G.extra) msg = 'Дубль! Бросай ещё раз';
     else if (G.phase === 'roll') msg = 'Бросай кубики';
     else msg = BOARD[pl.pos].name;
-    const dice = G.dice ? `<div class="dice" id="dice">${dieHTML(G.dice[0])}${dieHTML(G.dice[1])}</div>` : '';
+    const dice = G.dice && G.phase !== 'auction' && G.phase !== 'offer' ? `<div class="dice" id="dice">${dieHTML(G.dice[0])}${dieHTML(G.dice[1])}</div>` : '';
     return `${token(pl, 40)}<div class="col"><div class="who">${esc(pl.name)}</div><div class="msg">${esc(msg)}</div></div>${dice}`;
   }
 
@@ -142,6 +149,52 @@
     return `<button type="button" class="btn ${cls}" data-act="${action}" ${extra} ${disabled ? 'disabled' : ''}>${label}</button>`;
   }
 
+  // Кнопки «Обмен» и «Кредит» — доступны в спокойные моменты своего хода
+  function sideRow(pl) {
+    const canTrade = G.phase === 'roll' || G.phase === 'end';
+    const canLoan = ['roll', 'end', 'debt', 'buy'].includes(G.phase);
+    const parts = [];
+    if (canTrade) parts.push(btn(`${icon('swap', 'currentColor', 2.2)}Обмен`, 'tradeOpen', 'sm ic'));
+    if (canLoan) parts.push(btn(`${icon('card', 'currentColor', 2.2)}${pl.loan ? 'Кредит · ' + rub(pl.loan.owe) : 'Кредит'}`, 'loanOpen', 'sm ic'));
+    return parts.length ? `<div class="act-row side">${parts.join('')}</div>` : '';
+  }
+
+  function auctionHTML() {
+    const A = G.auction, c = BOARD[A.cell], pl = G.players[A.at];
+    const min = E.minBid(G);
+    const steps = A.leader === null ? [0, 50, 100] : [0, 40, 90];
+    const lead = A.leader === null
+      ? `Торги открываются с <b>${rub(A.start)}</b> (половина цены ${rub(c.price)}).`
+      : `Ставка сейчас: <b>${rub(A.price)}</b> — ${esc(G.players[A.leader].name)}.`;
+    const bidders = A.bidders.map(i => esc(G.players[i].name)).join(', ');
+    let h = `<div class="auction"><div class="a-head" style="--gc:${cellColor(c)}">${icon('gavel', '#ffffff', 2.2)}<div><b>Аукцион</b><span>${esc(c.name)}</span></div></div>
+      <p>${lead}</p><p class="sub">Торгуются: ${bidders}. Ставит ${esc(pl.name)}, денег: ${rub(pl.money)}.</p></div>`;
+    h += `<div class="act-row bids">${steps.map(d => {
+      const v = min + d;
+      return btn(A.leader === null ? rub(v) : `+${v - A.price} → ${rub(v)}`, 'bid', d ? '' : 'primary', v > pl.money, `data-amount="${v}"`);
+    }).join('')}</div>`;
+    h += `<div class="act-row">${btn('Пас', 'pass', 'dark')}${btn('О клетке', 'info', 'ghost', false, `data-cell="${A.cell}"`)}</div>`;
+    return h;
+  }
+
+  function offerHTML() {
+    const o = G.offer, from = G.players[o.from], to = G.players[o.to];
+    let body;
+    if (o.kind === 'trade') {
+      body = `<p><b>${esc(from.name)}</b> предлагает обмен.</p>
+        <div class="swap"><div><span class="sub">Вы получаете</span><b>${esc(E.describeSide(G, o.give))}</b></div>
+        <div><span class="sub">Вы отдаёте</span><b>${esc(E.describeSide(G, o.get))}</b></div></div>`;
+      const mort = o.give.cells.filter(i => G.own[i].mortgaged);
+      if (mort.length) body += `<p class="sub">Заложенные клетки: ${mort.map(i => esc(BOARD[i].name)).join(', ')}. За них вы заплатите банку 10% залога: ${rub(mort.reduce((n, i) => n + E.mortgageFee(i), 0))}.</p>`;
+    } else {
+      const owe = Math.round(o.amount * (1 + o.rate / 100));
+      body = `<p><b>${esc(from.name)}</b> просит в долг <b>${rub(o.amount)}</b> под ${o.rate}%.</p>
+        <p>Вернёт вам <b>${rub(owe)}</b> через ${laps(o.laps)}. Если не сможет — получите его имущество.</p>
+        <p class="sub">У вас ${rub(to.money)}.</p>`;
+    }
+    return `<div class="notice">${body}</div><div class="act-row">${btn('Принять', 'accept', 'primary big')}${btn('Отказаться', 'reject', 'big')}</div>`;
+  }
+
   function renderActions() {
     const pl = G.players[G.turn];
     let h = '';
@@ -149,6 +202,12 @@
       const w = G.players[G.winner];
       h += `<div class="notice">Победитель: <b>${esc(w.name)}</b>${G.overReason === 'time' ? ` — самый богатый (${rub(E.netWorth(G, G.winner))})` : ''}</div>`;
       h += `<div class="act-row">${btn('Новая партия', 'newGame', 'primary big')}</div>`;
+    } else if (G.phase === 'auction') {
+      h += auctionHTML();
+    } else if (G.phase === 'offer') {
+      h += offerHTML();
+    } else if (pl.bankrupt) {
+      h += `<div class="act-row">${btn('Завершить ход', 'endTurn', 'dark big')}</div>`;
     } else if (G.phase === 'roll' && pl.inJail) {
       h += `<div class="notice">Вы в зимовье, снаружи пурга. Попытка ${pl.jailTries + 1} из ${RULES.maxJailTries}: выбросьте дубль — пурга стихнет. Или вызовите вездеход за ${RULES.jailFine} ₽.</div>`;
       h += `<div class="act-row">${btn('Бросить на дубль', 'roll', 'primary')}${btn(`Вездеход · ${RULES.jailFine} ₽`, 'payJail', '', pl.money < RULES.jailFine)}${pl.freeCards.length ? btn('Попутный вездеход', 'useCard') : ''}</div>`;
@@ -157,20 +216,21 @@
     } else if (G.phase === 'buy') {
       const c = BOARD[G.pending.cell];
       const short = pl.money < c.price;
-      if (short) h += `<div class="notice bad">На ${esc(c.name)} не хватает денег.</div>`;
-      h += `<div class="act-row">${btn(`Купить ${rub(c.price)}`, 'buy', 'primary big', short)}${btn('Не покупать', 'decline', 'big')}</div>`;
+      if (short) h += `<div class="notice bad">На ${esc(c.name)} не хватает денег. Можно заложить клетку или взять кредит. Если не купите, клетка уйдёт на аукцион.</div>`;
+      h += `<div class="act-row">${btn(`Купить ${rub(c.price)}`, 'buy', 'primary big', short)}${btn('На аукцион', 'decline', 'big')}</div>`;
       h += `<div class="act-row">${btn('Подробнее о клетке', 'info', 'ghost', false, `data-cell="${G.pending.cell}"`)}</div>`;
     } else if (G.phase === 'debt') {
       const d = G.pending;
       const can = pl.money >= d.amount;
       const liquid = E.liquidValue(G, G.turn);
       h += `<div class="notice bad">Нужно заплатить <b>${rub(d.amount)}</b> (${esc(d.reason)}). У вас ${rub(pl.money)}.
-        ${!can && liquid >= d.amount ? ' Продайте дома в разделе «Имущество».' : ''}
-        ${liquid < d.amount ? ' Даже с продажей домов не хватает.' : ''}</div>`;
+        ${!can && liquid >= d.amount ? ' Продайте дома или заложите клетки в разделе «Имущество».' : ''}
+        ${liquid < d.amount ? ' Даже с продажей домов и залогом не хватает.' : ''}</div>`;
       h += `<div class="act-row">${btn('Заплатить', 'payDebt', 'primary', !can)}${btn('Объявить банкротство', 'bankrupt', 'danger', can)}</div>`;
     } else if (G.phase === 'end') {
       h += `<div class="act-row">${btn('Завершить ход', 'endTurn', 'dark big')}</div>`;
     }
+    if (G.phase !== 'over' && !pl.bankrupt && G.phase !== 'auction' && G.phase !== 'offer') h += sideRow(pl);
     $('actions').innerHTML = h;
   }
 
@@ -179,8 +239,9 @@
       const tags = [];
       if (p.bankrupt) tags.push('банкрот');
       else if (p.inJail) tags.push('в зимовье');
+      if (p.loan) tags.push(`долг ${rub(p.loan.owe)}`);
       if (p.freeCards.length) tags.push(`вездеход ×${p.freeCards.length}`);
-      return `<div class="pl${i === G.turn ? ' cur' : ''}${p.bankrupt ? ' out' : ''}">${token(p, 36)}
+      return `<div class="pl${i === E.actor(G) ? ' cur' : ''}${p.bankrupt ? ' out' : ''}">${token(p, 36)}
         <span class="col"><span class="nm">${esc(p.name)}</span><span class="mn">${p.bankrupt ? '—' : rub(p.money)}</span>${tags.length ? `<span class="tg">${tags.join(', ')}</span>` : ''}</span></div>`;
     }).join('');
   }
@@ -197,31 +258,48 @@
     return T.CELL_ICON[i] || T.TYPE_ICON[c.type];
   }
 
+  function loanLine(L) {
+    const from = L.from === BANK ? 'банку' : G.players[L.from].name;
+    return `Вернуть ${rub(L.owe)} → ${esc(from)}, ${L.laps > 0 ? 'через ' + laps(L.laps) : 'сейчас'}`;
+  }
+
   function renderAssets() {
     const p = G.turn, pl = G.players[p];
     $('assets-title').textContent = `Имущество: ${pl.name}`;
     const mine = Object.keys(G.own).map(Number).filter(i => G.own[i].owner === p).sort((a, b) => a - b);
-    if (!mine.length) { $('assets').innerHTML = '<p class="empty-note">Пока ничего нет. Покупайте клетки, на которые встаёте.</p>'; return; }
-    const canAct = ['roll', 'end', 'debt'].includes(G.phase);
-    $('assets').innerHTML = mine.map(i => {
+    let h = '';
+    if (pl.loan) h += `<div class="asset loan"><span class="sw" style="--gc:${T.C.deep}">${icon('card', '#ffffff', 2.2)}</span>
+      <span class="info" data-act="loanOpen" role="button" tabindex="0"><b>Кредит</b><span>${loanLine(pl.loan)}</span></span></div>`;
+    if (!mine.length) { $('assets').innerHTML = h + '<p class="empty-note">Пока ничего нет. Покупайте клетки, на которые встаёте.</p>'; return; }
+    const canAct = ['roll', 'end', 'debt', 'buy'].includes(G.phase) && !pl.bankrupt;
+    const calm = G.phase === 'roll' || G.phase === 'end';
+    h += mine.map(i => {
       const c = BOARD[i], o = G.own[i];
       let sub = '';
-      if (c.type === 'prop') {
+      if (o.mortgaged) sub = `в залоге · выкуп ${rub(E.unmortgageCost(i))}`;
+      else if (c.type === 'prop') {
         const full = E.ownsGroup(G, p, c.group);
         sub = o.houses === 5 ? 'отель' : o.houses ? `домов: ${o.houses}` : (full ? 'вся группа' : 'участок');
         sub += ` · аренда ${rub(E.rentFor(G, i))}`;
       } else if (c.type === 'transport') sub = `аренда ${rub(E.rentFor(G, i))}`;
       else sub = 'аренда по кубикам';
       let btns = '';
-      if (c.type === 'prop' && canAct && E.ownsGroup(G, p, c.group)) {
-        const b = E.canBuild(G, p, i) && G.phase !== 'debt';
-        const s = E.canSell(G, p, i);
-        btns = `<button type="button" class="btn sm" data-act="sell" data-cell="${i}" ${s ? '' : 'disabled'} aria-label="Продать дом">−</button>
-          <button type="button" class="btn sm" data-act="build" data-cell="${i}" ${b ? '' : 'disabled'} aria-label="Построить за ${GROUPS[c.group].house} ₽">+ ${GROUPS[c.group].house}</button>`;
+      if (canAct) {
+        const houses = c.type === 'prop' && E.groupHasHouses(G, c.group);
+        if (houses) {
+          btns = `<button type="button" class="btn sm" data-act="sell" data-cell="${i}" ${E.canSell(G, p, i) ? '' : 'disabled'} aria-label="Продать дом">−</button>
+            <button type="button" class="btn sm" data-act="build" data-cell="${i}" ${E.canBuild(G, p, i) && calm ? '' : 'disabled'} aria-label="Построить за ${GROUPS[c.group].house} ₽">+ ${GROUPS[c.group].house}</button>`;
+        } else if (o.mortgaged) {
+          if (calm) btns = `<button type="button" class="btn sm" data-act="unmortgage" data-cell="${i}" ${E.canUnmortgage(G, p, i) ? '' : 'disabled'}>Выкуп</button>`;
+        } else {
+          if (calm && E.canBuild(G, p, i)) btns += `<button type="button" class="btn sm" data-act="build" data-cell="${i}" aria-label="Построить за ${GROUPS[c.group].house} ₽">+ ${GROUPS[c.group].house}</button>`;
+          btns += `<button type="button" class="btn sm" data-act="mortgage" data-cell="${i}" aria-label="Заложить за ${E.mortgageValue(i)} ₽">Залог</button>`;
+        }
       }
-      return `<div class="asset"><span class="sw" style="--gc:${cellColor(c)}">${icon(cellIcon(i), '#ffffff', 2.4)}</span>
+      return `<div class="asset${o.mortgaged ? ' frozen' : ''}"><span class="sw" style="--gc:${cellColor(c)}">${icon(cellIcon(i), '#ffffff', 2.4)}</span>
         <span class="info" data-act="info" data-cell="${i}" role="button" tabindex="0"><b>${esc(c.name)}</b><span>${sub}</span></span>${btns}</div>`;
     }).join('');
+    $('assets').innerHTML = h;
   }
 
   function renderLog() {
@@ -235,6 +313,12 @@
     if (!left) { el.textContent = 'Время вышло'; return; }
     const m = Math.floor(left / 60000), s = Math.floor(left / 1000) % 60;
     el.textContent = `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  function renderPrize() {
+    const el = $('prize');
+    el.hidden = !G || !G.prize;
+    if (G && G.prize) el.innerHTML = `<span>Приз Ысыаха</span><b>${rub(G.prize)}</b>`;
   }
 
   function render(opts) {
@@ -254,6 +338,7 @@
     renderAssets();
     renderLog();
     renderTimer();
+    renderPrize();
   }
 
   // ---------- шторки ----------
@@ -268,10 +353,12 @@
     $('sheet').hidden = true;
     $('sheet-bg').hidden = true;
   }
+  const sheetIs = kind => !$('sheet').hidden && $('sheet').dataset.kind === kind;
+  function openKind(kind, html) { openSheet(html); $('sheet').dataset.kind = kind; }
 
   function showCard(card) {
     const ic = card.deck === 'bayanai' ? icon('bow', T.C.larch, 2.2) : icon('bowl', T.C.coral, 2.2);
-    openSheet(`<div class="card-wrap"><div class="card-face ${card.deck}">${ic}
+    openKind('card', `<div class="card-wrap"><div class="card-face ${card.deck}">${ic}
         <div class="deck">${esc(card.title)}</div><p>${esc(card.text)}</p></div></div>
       ${btn('Понятно', 'close', 'primary big')}`);
   }
@@ -282,10 +369,12 @@
     const owner = o ? G.players[o.owner].name : 'свободна';
     let h = '';
     const head = (title, sub) => `<div class="cell-head" style="--gc:${cellColor(c)}">${icon(cellIcon(i), '#ffffff', 2.2)}<div><h3>${esc(title)}</h3><p class="sub">${esc(sub)}</p></div></div>`;
+    const ownerRow = `<tr><td>Владелец</td><td>${esc(owner)}${o && o.mortgaged ? ' · в залоге' : ''}</td></tr>`;
+    const mortRows = c.price ? `<tr><td>Залог</td><td>+${rub(E.mortgageValue(i))}</td></tr><tr><td>Выкуп из залога</td><td>${rub(E.unmortgageCost(i))}</td></tr>` : '';
     if (c.type === 'prop') {
       const g = GROUPS[c.group];
       const full = o && E.ownsGroup(G, o.owner, c.group);
-      const cur = o ? o.houses : -1;
+      const cur = o && !o.mortgaged ? o.houses : -1;
       const rows = [
         ['Участок', c.rent[0], cur === 0 && !full],
         ['Вся группа у владельца', c.rent[0] * 2, cur === 0 && full],
@@ -297,64 +386,196 @@
           ${rows.map(r => `<tr class="${r[2] ? 'on' : ''}"><td>${r[0]}</td><td>${rub(r[1])}</td></tr>`).join('')}
           <tr><td>Цена участка</td><td>${rub(c.price)}</td></tr>
           <tr><td>Дом или отель</td><td>${rub(g.house)}</td></tr>
-          <tr><td>Владелец</td><td>${esc(owner)}</td></tr>
+          ${mortRows}${ownerRow}
         </tbody></table>`;
-      if (o && o.owner === G.turn && E.ownsGroup(G, G.turn, c.group) && ['roll', 'end', 'debt'].includes(G.phase)) {
-        h += `<div class="act-row">${btn('Продать дом', 'sell', '', !E.canSell(G, G.turn, i), `data-cell="${i}"`)}${btn(`Построить · ${rub(g.house)}`, 'build', 'primary', !E.canBuild(G, G.turn, i) || G.phase === 'debt', `data-cell="${i}"`)}</div>`;
+      if (o && o.owner === G.turn && E.ownsGroup(G, G.turn, c.group) && !o.mortgaged && ['roll', 'end', 'debt', 'buy'].includes(G.phase)) {
+        h += `<div class="act-row">${btn('Продать дом', 'sell', '', !E.canSell(G, G.turn, i), `data-cell="${i}"`)}${btn(`Построить · ${rub(g.house)}`, 'build', 'primary', !E.canBuild(G, G.turn, i) || !['roll', 'end'].includes(G.phase), `data-cell="${i}"`)}</div>`;
       }
     } else if (c.type === 'transport') {
       h = head(c.name, 'Транспорт') + `<table class="rent"><tbody>
         ${[1, 2, 3, 4].map(n => `<tr><td>Если у владельца ${n} ${n === 1 ? 'транспорт' : 'транспорта'}</td><td>${rub(RULES.transportRent[n])}</td></tr>`).join('')}
-        <tr><td>Цена</td><td>${rub(c.price)}</td></tr><tr><td>Владелец</td><td>${esc(owner)}</td></tr></tbody></table>`;
+        <tr><td>Цена</td><td>${rub(c.price)}</td></tr>${mortRows}${ownerRow}</tbody></table>`;
     } else if (c.type === 'utility') {
       h = head(c.name, 'Коммуналка') + `<table class="rent"><tbody>
         <tr><td>Одна у владельца</td><td>4 × сумма кубиков</td></tr>
         <tr><td>Обе у владельца</td><td>10 × сумма кубиков</td></tr>
-        <tr><td>Цена</td><td>${rub(c.price)}</td></tr><tr><td>Владелец</td><td>${esc(owner)}</td></tr></tbody></table>`;
+        <tr><td>Цена</td><td>${rub(c.price)}</td></tr>${mortRows}${ownerRow}</tbody></table>`;
     } else {
       const about = {
         start: `Каждый раз, когда проходишь Старт или встаёшь на него, получаешь ${rub(RULES.passStart)}.`,
         jail: 'Сюда попадают из-за пурги. Выбраться можно дублем (пурга стихла), вызвав вездеход за 50 ₽ или по карте «Попутный вездеход». После третьей попытки вездеход обязателен. Если пришёл сюда обычным ходом, ты просто в гостях.',
-        parking: 'Праздник Ысыах. Ничего не происходит, отдыхай.',
+        parking: `Праздник Ысыах. В Приз Ысыаха копятся налоги и проценты по кредитам банка. Кто встал сюда, забирает приз. Сейчас в призе: ${rub(G.prize)}.`,
         gotojail: 'Пурга! Тебя заметает в пути: отправляйся прямо в зимовьё, Старт не проходишь, 200 ₽ не получаешь.',
-        tax: `Заплати банку ${rub(c.amount || 0)}.`,
+        tax: `Заплати ${rub(c.amount || 0)}. Деньги уходят в Приз Ысыаха.`,
         bayanai: DECK_ABOUT.bayanai,
         tyusyulge: DECK_ABOUT.tyusyulge,
       }[c.type];
       h = head(c.name, 'Клетка') + `<p>${esc(about)}</p>`;
     }
+    // залог своей клетки
+    const me = G.turn, mine = o && o.owner === me && !G.players[me].bankrupt;
+    if (mine && o.mortgaged && (G.phase === 'roll' || G.phase === 'end')) {
+      h += `<div class="act-row">${btn(`Выкупить · ${rub(E.unmortgageCost(i))}`, 'unmortgage', 'primary', !E.canUnmortgage(G, me, i), `data-cell="${i}"`)}</div>`;
+    } else if (mine && !o.mortgaged && ['roll', 'end', 'debt', 'buy'].includes(G.phase)) {
+      const blocked = c.type === 'prop' && E.groupHasHouses(G, c.group);
+      h += `<div class="act-row">${btn(`Заложить · +${rub(E.mortgageValue(i))}`, 'mortgage', '', blocked, `data-cell="${i}"`)}</div>`;
+      if (blocked) h += '<p class="sub">Чтобы заложить, сначала продайте дома в этой группе.</p>';
+    }
     h += btn('Закрыть', 'close', 'ghost');
-    openSheet(h);
+    openKind('cell:' + i, h);
   }
 
+  // ---------- обмен ----------
+  function tradeTargets() { return G.players.map((_, i) => i).filter(i => i !== G.turn && !G.players[i].bankrupt); }
+
+  function readTradeMoney() {
+    if (!trade) return;
+    ['give', 'get'].forEach(side => {
+      const el = $('t-' + side);
+      if (el) trade[side].money = Math.max(0, Math.floor(Number(el.value) || 0));
+    });
+  }
+
+  function cellChips(owner, side) {
+    const ids = Object.keys(G.own).map(Number).filter(i => G.own[i].owner === owner).sort((a, b) => a - b);
+    const ok = ids.filter(i => E.canTradeCell(G, owner, i));
+    const locked = ids.length - ok.length;
+    let h = ok.length ? `<div class="chips">${ok.map(i => {
+      const on = trade[side].cells.includes(i), o = G.own[i];
+      return `<button type="button" class="chip" aria-pressed="${on}" data-act="tCell" data-side="${side}" data-cell="${i}" style="--gc:${cellColor(BOARD[i])}"><i></i>${esc(BOARD[i].name)}${o.mortgaged ? ' ❄' : ''}</button>`;
+    }).join('')}</div>` : '<p class="sub">Клеток для обмена нет.</p>';
+    if (locked) h += `<p class="sub">Клетки из групп с домами менять нельзя: ${locked}.</p>`;
+    return h;
+  }
+
+  function cardStepper(owner, side) {
+    const n = G.players[owner].freeCards.length;
+    if (!n) return '';
+    const v = trade[side].cards;
+    return `<div class="stepper"><span>«Попутный вездеход»</span>
+      <button type="button" class="btn sm" data-act="tCards" data-side="${side}" data-d="-1" ${v ? '' : 'disabled'} aria-label="Меньше">−</button>
+      <b>${v}</b><button type="button" class="btn sm" data-act="tCards" data-side="${side}" data-d="1" ${v < n ? '' : 'disabled'} aria-label="Больше">+</button></div>`;
+  }
+
+  function showTrade() {
+    const me = G.players[G.turn], them = G.players[trade.to];
+    const chips = tradeTargets().map(i => `<button type="button" class="who-chip" aria-pressed="${i === trade.to}" data-act="tTo" data-p="${i}">${token(G.players[i], 30)}<span>${esc(G.players[i].name)}</span></button>`).join('');
+    openKind('trade', `<h3>Обмен</h3>
+      <div class="who-row">${chips}</div>
+      <section class="tside"><h4>Вы отдаёте</h4>${cellChips(G.turn, 'give')}
+        <label class="money"><span>Деньги</span><input id="t-give" type="number" inputmode="numeric" min="0" step="10" max="${me.money}" value="${trade.give.money || ''}" placeholder="0"><em>из ${rub(me.money)}</em></label>
+        ${cardStepper(G.turn, 'give')}</section>
+      <section class="tside"><h4>Вы получаете · ${esc(them.name)}</h4>${cellChips(trade.to, 'get')}
+        <label class="money"><span>Деньги</span><input id="t-get" type="number" inputmode="numeric" min="0" step="10" max="${them.money}" value="${trade.get.money || ''}" placeholder="0"><em>из ${rub(them.money)}</em></label>
+        ${cardStepper(trade.to, 'get')}</section>
+      <p class="sub">За каждую полученную заложенную клетку (❄) платится банку 10% залога. ${esc(them.name)} увидит предложение и решит.</p>
+      ${btn('Предложить', 'tSend', 'primary big')}${btn('Отмена', 'close', 'ghost')}`);
+  }
+
+  // ---------- кредит ----------
+  function showLoan() {
+    const p = G.turn, pl = G.players[p];
+    let h = `<div class="loan-head">${icon('card', '#ffffff', 2.2)}</div><h3 class="center">Кредит</h3>`;
+    if (pl.loan) {
+      const L = pl.loan, calm = G.phase === 'roll' || G.phase === 'end';
+      h += `<table class="rent"><tbody>
+        <tr><td>Кредитор</td><td>${L.from === BANK ? 'Банк' : esc(G.players[L.from].name)}</td></tr>
+        <tr><td>Взято</td><td>${rub(L.principal)}</td></tr>
+        <tr><td>Вернуть</td><td>${rub(L.owe)}</td></tr>
+        <tr><td>Срок</td><td>${L.laps > 0 ? 'через ' + laps(L.laps) : 'сейчас'}</td></tr></tbody></table>
+        <p class="sub">Долг спишется сам, когда пройдёте Старт нужное число раз. Новый кредит можно взять после возврата.</p>
+        ${btn(`Вернуть досрочно · ${rub(L.owe)}`, 'loanRepay', 'primary big', !calm || pl.money < L.owe)}
+        ${btn('Закрыть', 'close', 'ghost')}`;
+      openKind('loan', h);
+      return;
+    }
+    const others = G.players.map((_, i) => i).filter(i => i !== p && !G.players[i].bankrupt);
+    const chips = [`<button type="button" class="who-chip" aria-pressed="${loan.from === BANK}" data-act="lFrom" data-p="${BANK}"><span class="bank">${icon('bank', T.C.ink, 2.1)}</span><span>Банк</span></button>`]
+      .concat(others.map(i => `<button type="button" class="who-chip" aria-pressed="${loan.from === i}" data-act="lFrom" data-p="${i}">${token(G.players[i], 30)}<span>${esc(G.players[i].name)}</span></button>`)).join('');
+    h += `<p class="sub center">Выберите, у кого взять, и условия</p><div class="who-row">${chips}</div>`;
+    let rate, lp, amountRow, note;
+    if (loan.from === BANK) {
+      const B = RULES.bankLoan;
+      rate = B.rate; lp = B.laps;
+      const opts = []; for (let v = B.step; v <= B.max; v += B.step) opts.push(v);
+      amountRow = `<div class="seg" role="radiogroup" aria-label="Сумма">${opts.map(v => `<button type="button" role="radio" aria-checked="${v === loan.amount}" data-act="lAmt" data-v="${v}">${v}</button>`).join('')}</div>`;
+      note = 'Проценты по кредиту банка идут в Приз Ысыаха.';
+    } else {
+      const L = G.players[loan.from];
+      rate = loan.rate; lp = loan.laps;
+      const max = Math.floor(L.money / RULES.loanStep) * RULES.loanStep;
+      amountRow = `<div class="stepper big"><button type="button" class="btn sm" data-act="lStep" data-d="-1" ${loan.amount > RULES.loanStep ? '' : 'disabled'} aria-label="Меньше">−</button>
+        <b>${rub(loan.amount)}</b><button type="button" class="btn sm" data-act="lStep" data-d="1" ${loan.amount + RULES.loanStep <= max ? '' : 'disabled'} aria-label="Больше">+</button></div>
+        <h4>Процент</h4><div class="seg" role="radiogroup" aria-label="Процент">${RULES.loanRates.map(v => `<button type="button" role="radio" aria-checked="${v === loan.rate}" data-act="lRate" data-v="${v}">${v}%</button>`).join('')}</div>
+        <h4>Срок</h4><div class="seg" role="radiogroup" aria-label="Срок">${RULES.loanLaps.map(v => `<button type="button" role="radio" aria-checked="${v === loan.laps}" data-act="lLaps" data-v="${v}">${laps(v)}</button>`).join('')}</div>`;
+      note = `Нужно согласие игрока ${esc(L.name)}: передайте телефон. Денег у игрока: ${rub(L.money)}.`;
+    }
+    const owe = Math.round(loan.amount * (1 + rate / 100));
+    h += `<h4>Сумма</h4>${amountRow}
+      <div class="loan-sum"><div><span>Вернуть через ${laps(lp)}</span><b>${rub(owe)}</b></div>
+      <p class="sub">${loan.from === BANK ? `Ставка ${rate}%. ` : ''}Если к сроку денег не хватит, придётся продать дома, заложить клетки или объявить банкротство. ${note}</p></div>
+      ${btn(loan.from === BANK ? 'Взять кредит' : 'Попросить в долг', 'lTake', 'primary big', loan.from !== BANK && G.players[loan.from].money < RULES.loanStep)}
+      ${btn('Отмена', 'close', 'ghost')}`;
+    openKind('loan', h);
+  }
+
+  function fixLoanAmount() {
+    if (loan.from === BANK) {
+      const B = RULES.bankLoan;
+      if (loan.amount % B.step || loan.amount > B.max || loan.amount < B.step) loan.amount = B.max;
+    } else {
+      const max = Math.max(RULES.loanStep, Math.floor(G.players[loan.from].money / RULES.loanStep) * RULES.loanStep);
+      loan.amount = Math.min(Math.max(RULES.loanStep, loan.amount - loan.amount % RULES.loanStep), max);
+    }
+  }
+
+  // ---------- меню и правила ----------
   function showMenu() {
-    openSheet(`<h3>Меню</h3>
+    openKind('menu', `<h3>Меню</h3>
       ${btn('Правила кратко', 'rules')}
       ${btn('Новая партия', 'askNew')}
       ${btn('Закрыть', 'close', 'ghost')}`);
   }
 
   function showRules() {
-    openSheet(`<h3>Правила кратко</h3>
+    openKind('rules', `<h3>Правила кратко</h3>
       <ul class="rules">
         <li>Бросай два кубика и ходи по кругу. Дубль даёт ещё один бросок, три дубля подряд — в пургу и в зимовьё.</li>
         <li>Клетка «Пурга» отправляет в «Зимовьё». Выбраться: дубль, вездеход за 50 ₽ или карта «Попутный вездеход».</li>
-        <li>Встал на свободную клетку — можешь купить её.</li>
-        <li>На чужой клетке платишь аренду. Если у владельца вся группа, аренда пустого участка удваивается.</li>
+        <li>Встал на свободную клетку — можешь купить её. Если не купил, клетка уходит на аукцион. Торги начинаются с половины цены, участвуют все.</li>
+        <li>На чужой клетке платишь аренду. Если у владельца вся группа, аренда пустого участка удваивается. С заложенной клетки аренда не берётся.</li>
         <li>Транспорт: 25, 50, 100 или 200 ₽, смотря сколько их у владельца. Коммуналка: 4× или 10× сумма кубиков.</li>
-        <li>Строить можно, когда собрана вся группа. Дома ставятся равномерно, до 4, потом отель. Продать дом можно за полцены.</li>
+        <li>Строить можно, когда собрана вся группа и ни одна клетка в ней не заложена. Дома ставятся равномерно, до 4, потом отель. Продать дом можно за полцены.</li>
+        <li>Залог: клетка без домов в группе закладывается за половину цены. Выкуп — залог плюс 10%.</li>
+        <li>Обмен: в начале или в конце своего хода предложи любому игроку клетки, деньги или карты «Попутный вездеход». За полученную заложенную клетку платишь банку 10% залога.</li>
+        <li>Кредит: в банке до 500 ₽ под 20% на 2 круга или у игрока на ваших условиях, если он согласится. Долг списывается сам после нужного числа проходов Старта. Кредит может быть только один.</li>
+        <li>Приз Ысыаха: налоги и проценты по кредитам банка копятся в призе. Кто встал на «Ысыах», забирает его.</li>
         <li>Проход через Старт: +200 ₽.</li>
-        <li>Не хватает денег — продавай дома. Если и это не помогает, ты банкрот. Побеждает последний оставшийся.</li>
+        <li>Не хватает денег — продавай дома и закладывай клетки. Если и это не помогает, ты банкрот: имущество получает тот, кому ты должен. Если должен банку — клетки уходят на аукцион. Побеждает последний оставшийся.</li>
         <li>Поле: нажми на клетку, чтобы узнать о ней. Двумя пальцами — приблизить, кнопка в углу — всё поле.</li>
       </ul>
       ${btn('Закрыть', 'close', 'ghost')}`);
   }
 
+  // Передать телефон тому, кто сейчас действует
   function showHandoff() {
-    const pl = G.players[G.turn];
-    openSheet(`<div class="handoff">${token(pl, 96)}<p class="sub">Передайте телефон</p>
-      <h3>${esc(pl.name)}</h3><p>${rub(pl.money)}</p></div>
-      ${btn('Мой ход', 'close', 'primary big')}`);
+    const who = E.actor(G), pl = G.players[who];
+    let sub = 'Передайте телефон', what = rub(pl.money), go = 'Мой ход';
+    if (G.phase === 'auction') {
+      const A = G.auction;
+      sub = 'Аукцион · передайте телефон';
+      what = `${BOARD[A.cell].name}: ${A.leader === null ? 'торги с ' + rub(A.start) : 'ставка ' + rub(A.price)}`;
+      go = 'Торговаться';
+    } else if (G.phase === 'offer') {
+      sub = 'Передайте телефон';
+      what = G.offer.kind === 'trade' ? `${G.players[G.offer.from].name} предлагает обмен` : `${G.players[G.offer.from].name} просит в долг`;
+      go = 'Посмотреть';
+    } else if (who === G.turn && G.phase !== 'roll') {
+      go = 'Продолжить ход';
+    }
+    openKind('handoff', `<div class="handoff">${token(pl, 96)}<p class="sub">${esc(sub)}</p>
+      <h3>${esc(pl.name)}</h3><p>${esc(what)}</p></div>
+      ${btn(go, 'close', 'primary big')}`);
   }
 
   let toastT = 0;
@@ -366,19 +587,22 @@
   }
 
   // ---------- действия ----------
-  function send(type, cell) {
-    const a = { type, player: G.turn };
-    if (cell !== undefined) a.cell = cell;
-    const before = G.turn;
+  function send(type, extra) {
+    const a = Object.assign({ type, player: E.actor(G) }, extra || {});
+    const before = G.turn, actorBefore = E.actor(G);
     const r = E.act(G, a);
-    if (!r.ok) { toast(r.error); return; }
+    if (!r.ok) { toast(r.error); return false; }
     save();
     const sheetOpen = !$('sheet').hidden;
     const opts = { rolled: type === 'roll', turnChanged: G.turn !== before };
-    if (sheetOpen && (type === 'build' || type === 'sell')) { render(opts); showCell(cell); return; }
+    const kind = $('sheet').dataset.kind || '';
+    if (sheetOpen && kind.startsWith('cell:') && ['build', 'sell', 'mortgage', 'unmortgage'].includes(type) && E.actor(G) === actorBefore) {
+      render(opts); showCell(a.cell); return true;
+    }
     closeSheet();
     render(opts);
-    if (opts.turnChanged && G.phase !== 'over') showHandoff();
+    if (G.phase !== 'over' && E.actor(G) !== actorBefore) showHandoff();
+    return true;
   }
 
   function onClick(e) {
@@ -387,16 +611,53 @@
     if (t.dataset.fig !== undefined) { readNames(); nextFigure(Number(t.dataset.fig)); renderSetup(); return; }
     const act = t.dataset.act;
     const cell = t.dataset.cell !== undefined ? Number(t.dataset.cell) : undefined;
+    const num = k => Number(t.dataset[k]);
     switch (act) {
       case 'close': closeSheet(); return;
       case 'info': showCell(cell); return;
       case 'rules': showRules(); return;
       case 'askNew':
-        openSheet(`<h3>Начать новую партию?</h3><p>Текущая партия будет удалена.</p>
+        openKind('ask', `<h3>Начать новую партию?</h3><p>Текущая партия будет удалена.</p>
           ${btn('Да, новая партия', 'newGame', 'danger')}${btn('Отмена', 'close', 'ghost')}`);
         return;
       case 'newGame': G = null; save(); showSetup(); return;
-      default: if (G) send(act, cell);
+
+      // обмен
+      case 'tradeOpen':
+        if (!trade || trade.to === G.turn || G.players[trade.to].bankrupt) trade = { to: tradeTargets()[0] };
+        trade = { to: trade.to, give: { cells: [], money: 0, cards: 0 }, get: { cells: [], money: 0, cards: 0 } };
+        showTrade(); return;
+      case 'tTo':
+        trade = { to: num('p'), give: { cells: [], money: 0, cards: 0 }, get: { cells: [], money: 0, cards: 0 } };
+        showTrade(); return;
+      case 'tCell': {
+        readTradeMoney();
+        const side = trade[t.dataset.side];
+        side.cells = side.cells.includes(cell) ? side.cells.filter(x => x !== cell) : side.cells.concat(cell);
+        showTrade(); return;
+      }
+      case 'tCards': readTradeMoney(); trade[t.dataset.side].cards += num('d'); showTrade(); return;
+      case 'tSend':
+        readTradeMoney();
+        send('offerTrade', { to: trade.to, give: trade.give, get: trade.get });
+        return;
+
+      // кредит
+      case 'loanOpen':
+        if (!loan) loan = { from: BANK, amount: RULES.bankLoan.max, rate: 20, laps: 2 };
+        if (loan.from !== BANK && (loan.from === G.turn || G.players[loan.from].bankrupt)) loan.from = BANK;
+        fixLoanAmount(); showLoan(); return;
+      case 'lFrom': loan.from = num('p'); if (loan.from !== BANK) loan.amount = 200; fixLoanAmount(); showLoan(); return;
+      case 'lAmt': loan.amount = num('v'); showLoan(); return;
+      case 'lStep': loan.amount += num('d') * RULES.loanStep; fixLoanAmount(); showLoan(); return;
+      case 'lRate': loan.rate = num('v'); showLoan(); return;
+      case 'lLaps': loan.laps = num('v'); showLoan(); return;
+      case 'lTake': send('takeLoan', { from: loan.from, amount: loan.amount, rate: loan.rate, laps: loan.laps }); return;
+      case 'loanRepay': send('repayLoan'); return;
+
+      case 'bid': send('bid', { amount: num('amount') }); return;
+      default:
+        if (G) send(act, cell !== undefined ? { cell } : undefined);
     }
   }
 
@@ -409,11 +670,12 @@
       if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"]')) { e.preventDefault(); e.target.click(); }
       if (e.key === 'Escape') closeSheet();
     });
-    $('sheet-bg').addEventListener('click', closeSheet);
+    $('sheet-bg').addEventListener('click', () => { if (!sheetIs('handoff')) closeSheet(); });
     $('btn-menu').addEventListener('click', showMenu);
     $('btn-all').addEventListener('click', () => board && board.showAll());
+    $('prize').addEventListener('click', () => showCell(20));
     $('btn-start').addEventListener('click', startGame);
-    $('btn-resume').addEventListener('click', () => { G = store.get(SAVE_KEY); if (G) { shownCard = G.card ? G.card.seq : 0; showGame(true); } });
+    $('btn-resume').addEventListener('click', () => { G = E.migrate(store.get(SAVE_KEY)); if (G) { shownCard = G.card ? G.card.seq : 0; showGame(true); } });
     $('count-seg').addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;
       readNames(); setup.count = Number(b.dataset.n); renderSetup();
@@ -424,7 +686,7 @@
     });
     setInterval(renderTimer, 1000);
 
-    if (hot && hot.G) { G = hot.G; shownCard = G.card ? G.card.seq : 0; showGame(true); }
+    if (hot && hot.G) { G = E.migrate(hot.G); shownCard = G.card ? G.card.seq : 0; showGame(true); }
     else renderSetup();
   }
 

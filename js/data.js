@@ -120,6 +120,15 @@
     transportRent: [0, 25, 50, 100, 200],
     utilityMult: [0, 4, 10],
     sellRate: 0.5,
+    // этап 2
+    mortgageRate: 0.5,        // залог — половина цены
+    mortgageFee: 0.1,         // выкуп — залог плюс 10%
+    auctionStart: 0.5,        // торги открываются с половины цены
+    bidStep: 10,
+    bankLoan: { step: 100, max: 500, rate: 20, laps: 2 },
+    loanRates: [10, 20, 30],  // проценты для кредита у игрока
+    loanLaps: [1, 2, 3],
+    loanStep: 50,
   };
 
   const COLORS = ['#e53935', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa', '#00acc1'];

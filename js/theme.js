@@ -53,6 +53,10 @@
     snow:   { s: 'M12 2v20M3 7l18 10M21 7L3 17M9 3l3 3 3-3M9 21l3-3 3 3' },
     hut:    { s: 'M3 11l9-7 9 7M5 9.5V20h14V9.5M5 13.5h14M5 16.8h14M10 20v-3.2h4V20M16.5 6.4V3h2.2v5.1' },
     blizzard:{ s: 'M3 8h10a3 3 0 10-3-3M3 13h15a3 3 0 11-3 3M3 18h7', f: 'M18 4.2a1 1 0 102 0 1 1 0 10-2 0zM19.5 9a1 1 0 102 0 1 1 0 10-2 0zM13 19.5a1 1 0 102 0 1 1 0 10-2 0z' },
+    swap:   { s: 'M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4' },
+    card:   { s: 'M3 6h18v12H3zM3 10h18M6.5 14.5h4' },
+    gavel:  { s: 'M13.5 3.5l6 6M11 6l6 6M10 12.5l-6.5 6.5M8.5 8.5l6 6M4 21h9' },
+    bank:   { s: 'M3 9l9-5 9 5M5 9v8M9.7 9v8M14.3 9v8M19 9v8M3 20h18' },
   };
   const GROUP_ICON = { 1: 'fish', 2: 'boat', 3: 'urasa', 4: 'pick', 5: 'frost', 6: 'beacon', 7: 'diamond', 8: 'serge' };
   const CELL_ICON = { 5: 'ship', 15: 'ferry', 25: 'train', 35: 'plane', 12: 'bolt', 28: 'flame' };
