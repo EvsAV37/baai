@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Баай</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="theme-color" content="#0f1c2e">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Yeseva+One&family=PT+Sans+Narrow:wght@400;700&family=PT+Sans:wght@400;700&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<!--APP-->
+<div id="app" lang="ru">
+  <!-- Экран настройки -->
+  <section id="setup" class="screen">
+    <header class="setup-head">
+      <h1 class="logo">Баай</h1>
+      <p class="tagline">Экономическая игра про Якутию</p>
+    </header>
+
+    <div id="resume-box" class="panel" hidden>
+      <p>Есть незаконченная партия.</p>
+      <button id="btn-resume" class="btn primary" type="button">Продолжить партию</button>
+    </div>
+
+    <div class="panel">
+      <h2 class="h2">Игроки</h2>
+      <div class="seg" id="count-seg" role="radiogroup" aria-label="Число игроков"></div>
+      <div id="names" class="names"></div>
+    </div>
+
+    <div class="panel">
+      <h2 class="h2">Ограничение по времени</h2>
+      <div class="seg" id="time-seg" role="radiogroup" aria-label="Время партии"></div>
+      <p class="hint">Когда время выйдет, побеждает самый богатый: деньги плюс имущество.</p>
+    </div>
+
+    <button id="btn-start" class="btn primary big" type="button">Начать игру</button>
+    <p class="copy">© 2026 Евсеев А.В.</p>
+  </section>
+
+  <!-- Экран игры -->
+  <section id="game" class="screen" hidden>
+    <div class="topbar">
+      <span class="logo small">Баай</span>
+      <span id="timer" class="timer"></span>
+      <button id="btn-menu" class="btn ghost" type="button" aria-label="Меню">Меню</button>
+    </div>
+
+    <div class="board-wrap">
+      <div id="board" class="board" aria-label="Игровое поле"></div>
+    </div>
+
+    <div id="actions" class="actions"></div>
+    <div id="players" class="players"></div>
+
+    <div class="panel">
+      <h2 class="h2" id="assets-title">Имущество</h2>
+      <div id="assets" class="assets"></div>
+    </div>
+
+    <div class="panel">
+      <h2 class="h2">События</h2>
+      <ol id="log" class="log"></ol>
+    </div>
+    <p class="copy">© 2026 Евсеев А.В.</p>
+  </section>
+
+  <!-- Нижняя шторка: клетка, карточка, меню, итог -->
+  <div id="sheet-bg" class="sheet-bg" hidden></div>
+  <div id="sheet" class="sheet" role="dialog" aria-modal="true" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+</div>
+<!--/APP-->
+<script src="js/data.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>
