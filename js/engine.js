@@ -30,7 +30,7 @@
     return {
       v: 1,
       players: players.map(p => ({
-        name: p.name, color: p.color,
+        name: p.name, color: p.color, figure: p.figure || 'horse',
         money: RULES.startMoney, pos: 0,
         inJail: false, jailTries: 0, freeCards: [], bankrupt: false,
       })),

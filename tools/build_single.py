@@ -10,10 +10,16 @@ from pathlib import Path
 root = Path(__file__).resolve().parent.parent
 html = (root / 'index.html').read_text(encoding='utf-8')
 css = (root / 'css/style.css').read_text(encoding='utf-8')
-scripts = ''.join(
+fragment = '--fragment' in sys.argv
+own = ''.join(
     f'<script>\n{(root / "js" / n).read_text(encoding="utf-8")}\n</script>\n'
-    for n in ('data.js', 'engine.js', 'ui.js')
+    for n in ('data.js', 'theme.js', 'engine.js', 'board.js', 'ui.js')
 )
+if fragment:
+    phaser = '<script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js"></script>\n'
+else:
+    phaser = f'<script>\n{(root / "vendor/phaser.min.js").read_text(encoding="utf-8")}\n</script>\n'
+scripts = phaser + own
 app = re.search(r'<!--APP-->(.*)<!--/APP-->', html, re.S).group(1)
 fonts = re.search(r'<link rel="stylesheet" href="(https://fonts[^"]+)">', html).group(1)
 
@@ -27,7 +33,7 @@ head = f'''<title>Баай</title>
 
 out = root / 'dist'
 out.mkdir(exist_ok=True)
-if '--fragment' in sys.argv:
+if fragment:
     page = head + app + scripts
     (out / 'baai-artifact.html').write_text(page, encoding='utf-8')
 else:
