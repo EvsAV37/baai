@@ -104,17 +104,38 @@
   }
 
   // ---------- экран игры ----------
+  const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
+  function dieHTML(n) {
+    let h = '';
+    for (let k = 0; k < 9; k++) h += `<i${PIPS[n].includes(k) ? '' : ' class="o"'}></i>`;
+    return `<span class="die${n === 1 ? ' one' : ''}" aria-label="${n}">${h}</span>`;
+  }
+
   function statusHTML() {
     const pl = G.players[G.turn];
     let msg = '';
     if (G.phase === 'over') msg = 'Партия окончена';
     else if (G.phase === 'buy') msg = `${BOARD[G.pending.cell].name}: можно купить`;
     else if (G.phase === 'debt') msg = `Нужно заплатить ${rub(G.pending.amount)}`;
-    else if (G.phase === 'roll' && pl.inJail) msg = 'В изоляторе';
-    else if (G.phase === 'roll' && G.extra) msg = `Дубль! Бросай ещё раз`;
+    else if (G.phase === 'roll' && pl.inJail) msg = 'Пережидает пургу в зимовье';
+    else if (G.phase === 'roll' && G.extra) msg = 'Дубль! Бросай ещё раз';
     else if (G.phase === 'roll') msg = 'Бросай кубики';
-    else msg = G.dice ? `Выпало ${G.dice[0]} + ${G.dice[1]} · ${BOARD[pl.pos].name}` : BOARD[pl.pos].name;
-    return `${token(pl, 40)}<div><div class="who">${esc(pl.name)}</div><div class="msg">${esc(msg)}</div></div><div class="money">${rub(pl.money)}</div>`;
+    else msg = BOARD[pl.pos].name;
+    const dice = G.dice ? `<div class="dice" id="dice">${dieHTML(G.dice[0])}${dieHTML(G.dice[1])}</div>` : '';
+    return `${token(pl, 40)}<div class="col"><div class="who">${esc(pl.name)}</div><div class="msg">${esc(msg)}</div></div>${dice}`;
+  }
+
+  // Кубики катятся: несколько случайных граней, потом выпавшие
+  function rollDice(d) {
+    const el = $('dice'); if (!el) return;
+    el.classList.add('roll');
+    let t = 0;
+    const tick = () => {
+      t++;
+      if (t < 8) { el.innerHTML = dieHTML(1 + Math.floor(Math.random() * 6)) + dieHTML(1 + Math.floor(Math.random() * 6)); setTimeout(tick, 70); }
+      else { el.innerHTML = dieHTML(d[0]) + dieHTML(d[1]); el.classList.remove('roll'); }
+    };
+    tick();
   }
 
   function btn(label, action, cls = '', disabled = false, extra = '') {
@@ -129,8 +150,8 @@
       h += `<div class="notice">Победитель: <b>${esc(w.name)}</b>${G.overReason === 'time' ? ` — самый богатый (${rub(E.netWorth(G, G.winner))})` : ''}</div>`;
       h += `<div class="act-row">${btn('Новая партия', 'newGame', 'primary big')}</div>`;
     } else if (G.phase === 'roll' && pl.inJail) {
-      h += `<div class="notice">Вы в изоляторе. Попытка ${pl.jailTries + 1} из ${RULES.maxJailTries}: выбросьте дубль, заплатите ${RULES.jailFine} ₽ или отдайте карту.</div>`;
-      h += `<div class="act-row">${btn('Бросить на дубль', 'roll', 'primary')}${btn(`Заплатить ${RULES.jailFine} ₽`, 'payJail', '', pl.money < RULES.jailFine)}${pl.freeCards.length ? btn('Карта освобождения', 'useCard') : ''}</div>`;
+      h += `<div class="notice">Вы в зимовье, снаружи пурга. Попытка ${pl.jailTries + 1} из ${RULES.maxJailTries}: выбросьте дубль — пурга стихнет. Или вызовите вездеход за ${RULES.jailFine} ₽.</div>`;
+      h += `<div class="act-row">${btn('Бросить на дубль', 'roll', 'primary')}${btn(`Вездеход · ${RULES.jailFine} ₽`, 'payJail', '', pl.money < RULES.jailFine)}${pl.freeCards.length ? btn('Попутный вездеход', 'useCard') : ''}</div>`;
     } else if (G.phase === 'roll') {
       h += `<div class="act-row">${btn(G.extra ? 'Бросить ещё раз' : 'Бросить кубики', 'roll', 'primary big')}</div>`;
     } else if (G.phase === 'buy') {
@@ -157,8 +178,8 @@
     $('players').innerHTML = G.players.map((p, i) => {
       const tags = [];
       if (p.bankrupt) tags.push('банкрот');
-      else if (p.inJail) tags.push('в изоляторе');
-      if (p.freeCards.length) tags.push(`выход ×${p.freeCards.length}`);
+      else if (p.inJail) tags.push('в зимовье');
+      if (p.freeCards.length) tags.push(`вездеход ×${p.freeCards.length}`);
       return `<div class="pl${i === G.turn ? ' cur' : ''}${p.bankrupt ? ' out' : ''}">${token(p, 36)}
         <span class="col"><span class="nm">${esc(p.name)}</span><span class="mn">${p.bankrupt ? '—' : rub(p.money)}</span>${tags.length ? `<span class="tg">${tags.join(', ')}</span>` : ''}</span></div>`;
     }).join('');
@@ -217,19 +238,22 @@
   }
 
   function render(opts) {
-    if (board) board.update(G, opts || {});
+    opts = Object.assign({}, opts);
+    // новую карточку показываем, когда фишка дошла до клетки
+    if (G.card && G.card.seq > shownCard) {
+      shownCard = G.card.seq;
+      const card = G.card;
+      opts.onSettled = () => showCard(card);
+    }
     $('status').innerHTML = statusHTML();
+    if (opts.rolled && G.dice) rollDice(G.dice);
+    if (board) board.update(G, opts);
+    else if (opts.onSettled) opts.onSettled();
     renderActions();
     renderPlayers();
     renderAssets();
     renderLog();
     renderTimer();
-    if (G.card && G.card.seq > shownCard) {
-      shownCard = G.card.seq;
-      // карточку показываем после того, как кубики докатились
-      const card = G.card;
-      setTimeout(() => showCard(card), opts && opts.rolled ? 900 : 0);
-    }
   }
 
   // ---------- шторки ----------
@@ -290,9 +314,9 @@
     } else {
       const about = {
         start: `Каждый раз, когда проходишь Старт или встаёшь на него, получаешь ${rub(RULES.passStart)}.`,
-        jail: 'Если попал сюда просто ходом, ты в гостях. Из изолятора выходят дублем, за 50 ₽ или по карте освобождения.',
+        jail: 'Сюда попадают из-за пурги. Выбраться можно дублем (пурга стихла), вызвав вездеход за 50 ₽ или по карте «Попутный вездеход». После третьей попытки вездеход обязателен. Если пришёл сюда обычным ходом, ты просто в гостях.',
         parking: 'Праздник Ысыах. Ничего не происходит, отдыхай.',
-        gotojail: 'Застрял на зимнике: отправляйся прямо в изолятор, Старт не проходишь.',
+        gotojail: 'Пурга! Тебя заметает в пути: отправляйся прямо в зимовьё, Старт не проходишь, 200 ₽ не получаешь.',
         tax: `Заплати банку ${rub(c.amount || 0)}.`,
         bayanai: DECK_ABOUT.bayanai,
         tyusyulge: DECK_ABOUT.tyusyulge,
@@ -313,7 +337,8 @@
   function showRules() {
     openSheet(`<h3>Правила кратко</h3>
       <ul class="rules">
-        <li>Бросай два кубика и ходи по кругу. Дубль даёт ещё один бросок, три дубля подряд ведут в изолятор.</li>
+        <li>Бросай два кубика и ходи по кругу. Дубль даёт ещё один бросок, три дубля подряд — в пургу и в зимовьё.</li>
+        <li>Клетка «Пурга» отправляет в «Зимовьё». Выбраться: дубль, вездеход за 50 ₽ или карта «Попутный вездеход».</li>
         <li>Встал на свободную клетку — можешь купить её.</li>
         <li>На чужой клетке платишь аренду. Если у владельца вся группа, аренда пустого участка удваивается.</li>
         <li>Транспорт: 25, 50, 100 или 200 ₽, смотря сколько их у владельца. Коммуналка: 4× или 10× сумма кубиков.</li>

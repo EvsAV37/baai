@@ -242,7 +242,7 @@
     const pl = s.players[p];
     pl.pos = RULES.jailPos; pl.inJail = true; pl.jailTries = 0;
     if (p === s.turn) { s.extra = false; s.doubles = 0; }
-    log(s, `🔒 ${pl.name} отправляется в изолятор`);
+    log(s, `❄ ${pl.name} пережидает пургу в зимовье`);
   }
 
   // Что происходит на клетке
@@ -381,15 +381,15 @@
         if (pl.inJail) {
           if (dbl) {
             pl.inJail = false; pl.jailTries = 0; s.extra = false;
-            log(s, `${pl.name} выходит из изолятора`);
+            log(s, `Пурга стихла: ${pl.name} выходит из зимовья`);
             moveBy(s, p, sum);
           } else {
             pl.jailTries++;
             if (pl.jailTries >= RULES.maxJailTries) {
               pl.inJail = false; pl.jailTries = 0; s.extra = false;
-              charge(s, p, BANK, RULES.jailFine, 'выход из изолятора', { move: sum });
+              charge(s, p, BANK, RULES.jailFine, 'вездеход из зимовья', { move: sum });
             } else {
-              log(s, `${pl.name} остаётся в изоляторе (попытка ${pl.jailTries} из ${RULES.maxJailTries})`);
+              log(s, `${pl.name} остаётся в зимовье (попытка ${pl.jailTries} из ${RULES.maxJailTries})`);
             }
           }
           s.extra = false;
@@ -400,7 +400,7 @@
         if (dbl) {
           s.doubles++;
           if (s.doubles >= 3) {
-            log(s, 'Три дубля подряд!');
+            log(s, 'Три дубля подряд — гнал и попал в пургу!');
             sendToJail(s, p);
             settle(s);
             return ok();
@@ -413,20 +413,20 @@
       }
 
       case 'payJail': {
-        if (s.phase !== 'roll' || !pl.inJail) return err('Вы не в изоляторе');
+        if (s.phase !== 'roll' || !pl.inJail) return err('Вы не в зимовье');
         if (pl.money < RULES.jailFine) return err('Не хватает денег');
         pl.money -= RULES.jailFine; pl.inJail = false; pl.jailTries = 0;
-        log(s, `${pl.name} платит ${rub(RULES.jailFine)} и выходит из изолятора`);
+        log(s, `${pl.name} вызывает вездеход за ${rub(RULES.jailFine)} и выходит из зимовья`);
         return ok();
       }
 
       case 'useCard': {
-        if (s.phase !== 'roll' || !pl.inJail) return err('Вы не в изоляторе');
-        if (!pl.freeCards.length) return err('Нет карты освобождения');
+        if (s.phase !== 'roll' || !pl.inJail) return err('Вы не в зимовье');
+        if (!pl.freeCards.length) return err('Нет карты «Попутный вездеход»');
         const deck = pl.freeCards.shift();
         s.decks[deck].push(DECKS[deck].findIndex(c => c.free));
         pl.inJail = false; pl.jailTries = 0;
-        log(s, `${pl.name} использует карту освобождения`);
+        log(s, `${pl.name} уезжает на попутном вездеходе`);
         return ok();
       }
 

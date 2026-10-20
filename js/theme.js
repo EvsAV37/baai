@@ -12,7 +12,7 @@
     rim: '#dfe4e8',
     coral: '#c8473d',     // коралл: главное действие, Старт
     larch: '#3f6b4a',     // лиственница: Байанай, Ысыах
-    deep: '#23395d',      // глубокий синий: изолятор
+    deep: '#23395d',      // глубокий синий: зимовьё
     gold: '#c9a23a',
     muted: '#6b7a86',
     tyusyulge: '#f3e2dc',
@@ -51,10 +51,12 @@
     jail:   { s: 'M5 4v16M9.7 4v16M14.3 4v16M19 4v16M3 4h18M3 20h18' },
     sun:    { s: 'M8 12a4 4 0 108 0 4 4 0 10-8 0zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2' },
     snow:   { s: 'M12 2v20M3 7l18 10M21 7L3 17M9 3l3 3 3-3M9 21l3-3 3 3' },
+    hut:    { s: 'M3 11l9-7 9 7M5 9.5V20h14V9.5M5 13.5h14M5 16.8h14M10 20v-3.2h4V20M16.5 6.4V3h2.2v5.1' },
+    blizzard:{ s: 'M3 8h10a3 3 0 10-3-3M3 13h15a3 3 0 11-3 3M3 18h7', f: 'M18 4.2a1 1 0 102 0 1 1 0 10-2 0zM19.5 9a1 1 0 102 0 1 1 0 10-2 0zM13 19.5a1 1 0 102 0 1 1 0 10-2 0z' },
   };
   const GROUP_ICON = { 1: 'fish', 2: 'boat', 3: 'urasa', 4: 'pick', 5: 'frost', 6: 'beacon', 7: 'diamond', 8: 'serge' };
   const CELL_ICON = { 5: 'ship', 15: 'ferry', 25: 'train', 35: 'plane', 12: 'bolt', 28: 'flame' };
-  const TYPE_ICON = { tax: 'coin', bayanai: 'bow', tyusyulge: 'bowl', start: 'start', jail: 'jail', parking: 'sun', gotojail: 'snow' };
+  const TYPE_ICON = { tax: 'coin', bayanai: 'bow', tyusyulge: 'bowl', start: 'start', jail: 'hut', parking: 'sun', gotojail: 'blizzard' };
 
   // Фигурки фишек: белый силуэт 24×24
   const FIGURES = [
