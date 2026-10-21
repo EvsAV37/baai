@@ -12,7 +12,17 @@ const stat = { games: 0, finished: 0, byTime: 0, errors: 0, turns: 0, auctions: 
 function bot(s) {
   const p = E.actor(s), pl = s.players[p];
   const mine = cells().filter(i => s.own[i] && s.own[i].owner === p);
+  // способность роли — иногда, когда можно
+  if (E.canAbility(s, p) && R() < 0.15) {
+    const role = pl.role;
+    if (role === 'uus') { const c = mine.find(i => BOARD[i].type === 'prop' && !s.own[i].mortgaged && !s.own[i].houses); if (c !== undefined) return { type: 'ability', cell: c }; }
+    else if (role === 'kayur') return { type: 'ability', cell: pick([5, 15, 25, 35].filter(i => i !== pl.pos)) };
+    else return { type: 'ability' };
+  }
   switch (s.phase) {
+    case 'roles': return { type: 'pickRole', role: pick(D.ROLES).id };
+    case 'omen': return { type: R() < 0.5 ? 'go' : 'reroll' };
+    case 'pick2': return { type: 'pickCard', k: R() < 0.5 ? 0 : 1 };
     case 'auction': {
       const A = s.auction, need = E.minBid(s), worth = E.price(s, A.cell);
       if (need <= pl.money && need <= worth * (0.6 + R() * 0.7) && R() < 0.75) {
@@ -91,20 +101,21 @@ function check(s) {
     const o = s.own[k], c = BOARD[k];
     if (s.players[o.owner].bankrupt) throw new Error('owner bankrupt');
     if (o.mortgaged && o.houses) throw new Error('houses on mortgaged');
-    if (c.type === 'prop' && o.houses && E.groupCells(c.group).some(j => s.own[j].mortgaged)) throw new Error('houses in mortgaged group');
+    if (c.type === 'prop' && o.houses && E.groupCells(c.group).some(j => s.own[j] && s.own[j].mortgaged)) throw new Error('houses in mortgaged group');
   }
   for (const i of s.auctionQueue) if (s.own[i]) throw new Error('queued cell owned');
   if (s.phase === 'auction' && (!s.auction || s.auction.at === null || s.players[s.auction.at].bankrupt)) throw new Error('auction state');
   for (const d of ['bayanai', 'tyusyulge']) {
     const held = s.players.filter(q => !q.bankrupt).reduce((n, q) => n + q.freeCards.filter(x => x === d).length, 0);
-    if (s.decks[d].length + held !== 16) throw new Error('deck ' + d);
+    const out = s.choice && s.choice.deck === d ? s.choice.ids.length : 0;
+    if (s.decks[d].length + held + out !== 16) throw new Error('deck ' + d);
   }
 }
 
 for (let g = 0; g < 2000; g++) {
   const n = 2 + (g % 5);
   // правила партии перебираем по битам номера партии
-  const rules = { auction: g & 1 ? 'sealed' : 'open', money: g & 2 ? 'hidden' : 'open', growth: g & 4 ? 'grow' : 'flat', prize: g & 8 ? 'off' : 'on' };
+  const rules = { auction: g & 1 ? 'sealed' : 'open', money: g & 2 ? 'hidden' : 'open', growth: g & 4 ? 'grow' : 'flat', prize: g & 8 ? 'off' : 'on', roles: ['off', 'pick', 'random'][g % 3] };
   const s = E.create(Array.from({ length: n }, (_, i) => ({ name: 'И' + i, color: D.COLORS[i] })), { rules });
   if (rules.auction === 'sealed') stat.sealed = (stat.sealed || 0) + 1;
   let steps = 0, prevPrize = 0;
@@ -117,7 +128,8 @@ for (let g = 0; g < 2000; g++) {
     if (!r.ok) {
       // отказ из-за условий (нет денег, клетка с домами) — нормален, бот просто ошибся
       if (s.players[a.player].bankrupt) { E.act(s, { type: 'endTurn', player: a.player }); continue; }
-      if (['offerTrade', 'takeLoan', 'accept', 'unmortgage', 'repayLoan', 'mortgage'].includes(a.type)) {
+      if (['offerTrade', 'takeLoan', 'accept', 'unmortgage', 'repayLoan', 'mortgage', 'ability', 'buy'].includes(a.type)) {
+        if (a.type === 'buy') E.act(s, { type: 'decline', player: a.player });
         if (a.type === 'accept') E.act(s, { type: 'reject', player: a.player });
         continue;
       }
@@ -129,6 +141,7 @@ for (let g = 0; g < 2000; g++) {
     if (a.type === 'takeLoan' && a.from === E.BANK) stat.loans++;
     if (a.type === 'mortgage') stat.mortgages++;
     if (prevPrize > 0 && s.prize === 0) stat.prizes++;
+    if (a.type === 'ability' || a.type === 'reroll') stat.abilities = (stat.abilities || 0) + 1;
     prevPrize = s.prize;
     check(s);
     if (s.rules.prize === 'off' && s.prize) throw new Error('prize while off');

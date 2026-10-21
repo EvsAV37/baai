@@ -461,6 +461,29 @@ body {
 .rule-v { font-weight: 700; margin: 0; }
 .bid-in { margin: 10px 0 4px; }
 
+/* ---------- тайные роли ---------- */
+.roles-pick { display: flex; flex-direction: column; gap: 10px; }
+.role-card { background: var(--paper); border: 2px solid var(--ink); border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.role-top { display: flex; align-items: center; gap: 10px; }
+.role-top svg { width: 34px; height: 34px; flex: none; }
+.role-top div { display: flex; flex-direction: column; line-height: 1.1; }
+.role-top b { font-family: var(--f-display); font-size: 22px; }
+.role-top span { color: var(--muted); font-size: 14px; }
+.rp { margin: 0; padding-left: 22px; position: relative; font-size: 15px; line-height: 1.3; }
+.rp::before { position: absolute; left: 0; top: 0; width: 16px; height: 16px; margin-top: 1px; border-radius: 50%;
+  color: #fff; font-size: 12px; font-weight: 700; line-height: 16px; text-align: center; }
+.rp.plus::before { content: "+"; background: var(--larch); }
+.rp.once::before { content: "1"; background: var(--coral); }
+.rp.minus::before { content: "−"; background: var(--ink); }
+.rp.used { color: var(--muted); text-decoration: line-through; }
+.rp.used em { text-decoration: none; font-style: normal; }
+.role-card .btn { margin-top: 4px; }
+.btn.role-btn { width: 100%; border-style: dashed; border-color: var(--coral); color: var(--coral); background: var(--paper); }
+.pick2 { display: flex; flex-direction: column; gap: 10px; }
+.card-face.pick { font: inherit; color: var(--ink); cursor: pointer; min-height: 120px; width: 100%; animation: none; }
+.card-face.pick p { font-size: 18px; }
+.notice > svg { width: 20px; height: 20px; vertical-align: -4px; }
+
 </style>
 </head>
 <body>
@@ -693,9 +716,41 @@ body {
     loanStep: 50,
   };
 
+  // Тайные роли: плюс, способность раз за игру, минус. Механика — в engine.js
+  const ROLES = [
+    { id: 'ojuun', name: 'Ойуун', who: 'шаман', icon: 'drum',
+      plus: '«Пурга!» не уносит тебя в зимовьё — духи ведут сквозь метель.',
+      once: 'Шаманский бросок: увидев кубики, можно перебросить их один раз.',
+      minus: 'Выплаты по карточкам «Тюсюлгэ» в полтора раза больше.' },
+    { id: 'uus', name: 'Уус', who: 'кузнец', icon: 'anvil',
+      plus: 'Дома и отели обходятся на 20% дешевле.',
+      once: 'Поставить дом на свой участок, даже если группа собрана не вся.',
+      minus: 'Проданный дом приносит треть цены, а не половину.' },
+    { id: 'bulchut', name: 'Булчут', who: 'охотник', icon: 'bow',
+      plus: 'На «Байанае» тянешь две карточки и выбираешь одну.',
+      once: 'Засада: следующая аренда с твоих клеток — вдвойне.',
+      minus: 'Не покупаешь транспорт: ни у банка, ни на аукционе, ни обменом.' },
+    { id: 'atyyhyt', name: 'Атыыһыт', who: 'торговец', icon: 'scales',
+      plus: 'Обмен без платы 10% за заложенные клетки.',
+      once: 'На аукционе, когда ставишь ты: забрать клетку по стартовой цене без торгов.',
+      minus: 'Налоги в полтора раза больше.' },
+    { id: 'kayur', name: 'Каюр', who: 'погонщик упряжки', icon: 'sled',
+      plus: 'Твой транспорт приносит в полтора раза больше аренды.',
+      once: 'Вместо броска уехать на любую клетку транспорта.',
+      minus: 'Из зимовья дубль не выводит — только плата или карта.' },
+    { id: 'toyon', name: 'Тойон', who: 'хозяин', icon: 'crown',
+      plus: 'На Старте +25 ₽ за каждую свою полную группу.',
+      once: 'Созвать сход: каждый игрок платит тебе 30 ₽.',
+      minus: 'Твои участки без домов приносят на 10% меньше.' },
+    { id: 'olonkhosut', name: 'Олонхосут', who: 'сказитель', icon: 'scroll',
+      plus: 'На «Ысыахе» получаешь 100 ₽, даже когда приза нет.',
+      once: 'Забрать Приз Ысыаха, не вставая на клетку.',
+      minus: 'Банк не даёт тебе кредит.' },
+  ];
+
   const COLORS = ['#e53935', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa', '#00acc1'];
 
-  const DATA = { GROUPS, BOARD, BAYANAI, TYUSYULGE, RULES, COLORS };
+  const DATA = { GROUPS, BOARD, BAYANAI, TYUSYULGE, RULES, COLORS, ROLES };
   root.BAAI = root.BAAI || {};
   root.BAAI.data = DATA;
   if (typeof module !== 'undefined') module.exports = DATA;
@@ -765,6 +820,13 @@ body {
     card:   { s: 'M3 6h18v12H3zM3 10h18M6.5 14.5h4' },
     grow:   { s: 'M3 20h18M4 16l5-5 4 3 7-8M15 6h5v5' },
     eye:    { s: 'M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12zM9 12a3 3 0 106 0 3 3 0 10-6 0z' },
+    mask:   { s: 'M4 5c5 1.5 11 1.5 16 0v6c0 5-3.6 9-8 9s-8-4-8-9zM7.5 10.5c1-1 2.5-1 3.5 0M13 10.5c1-1 2.5-1 3.5 0M9 15.5c2 1.4 4 1.4 6 0' },
+    drum:   { s: 'M4 12a8 8 0 1016 0 8 8 0 10-16 0zM12 4v16M4 12h16M7 7l10 10M17 7 7 17', f: 'M10.4 12a1.6 1.6 0 103.2 0 1.6 1.6 0 10-3.2 0z' },
+    anvil:  { s: 'M3 7h13c0 3 2 4 5 4-3 1-5 2-6 4H9c-1-2-3-3-6-3zM9 15l-2 5h10l-2-5' },
+    scales: { s: 'M12 3v18M8 21h8M4 6h16M6 6l-3 7h6zM18 6l-3 7h6z' },
+    sled:   { s: 'M3 17h15c2 0 3-1 3-3M6 17v-4h10v4M8 13l1-4h5l1 4M2 20h17' },
+    crown:  { s: 'M3 8l4 4 5-7 5 7 4-4-2 11H5zM5 19h14' },
+    scroll: { s: 'M7 4h11a2 2 0 010 4H7zM7 4a2 2 0 00-2 2v12a2 2 0 002 2h10V8M9 12h6M9 15h4' },
     gavel:  { s: 'M13.5 3.5l6 6M11 6l6 6M10 12.5l-6.5 6.5M8.5 8.5l6 6M4 21h9' },
     bank:   { s: 'M3 9l9-5 9 5M5 9v8M9.7 9v8M14.3 9v8M19 9v8M3 20h18' },
     sound:  { s: 'M4 9.5h3.5L12 5v14l-4.5-4.5H4zM15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11' },
@@ -1171,7 +1233,8 @@ body {
   'use strict';
 
   const D = (typeof module !== 'undefined') ? require('./data.js') : root.BAAI.data;
-  const { BOARD, GROUPS, BAYANAI, TYUSYULGE, RULES } = D;
+  const { BOARD, GROUPS, BAYANAI, TYUSYULGE, RULES, ROLES } = D;
+  const ROLE = Object.fromEntries(ROLES.map(r => [r.id, r]));
   const DECKS = { bayanai: BAYANAI, tyusyulge: TYUSYULGE };
   const DECK_NAMES = { bayanai: 'Байанай', tyusyulge: 'Тюсюлгэ' };
   const BANK = -1;
@@ -1195,8 +1258,9 @@ body {
   // money:   open — деньги всех видны, hidden — видны только свои
   // growth:  flat — цены постоянные, grow — каждые GROW_EVERY кругов +10% (до +50%)
   // prize:   on — налоги копятся в Приз Ысыаха, off — уходят банку, приза нет
-  const RULE_DEFAULTS = { auction: 'open', money: 'open', growth: 'flat', prize: 'on' };
-  const RULE_VALUES = { auction: ['open', 'sealed'], money: ['open', 'hidden'], growth: ['flat', 'grow'], prize: ['on', 'off'] };
+  // roles:   off — без ролей, pick — каждый выбирает втайне, random — раздаются случайно
+  const RULE_DEFAULTS = { auction: 'open', money: 'open', growth: 'flat', prize: 'on', roles: 'off' };
+  const RULE_VALUES = { auction: ['open', 'sealed'], money: ['open', 'hidden'], growth: ['flat', 'grow'], prize: ['on', 'off'], roles: ['off', 'pick', 'random'] };
   const GROW_EVERY = 5, GROW_STEP = 0.1, GROW_MAX = 1.5;
 
   function normRules(r) {
@@ -1208,20 +1272,27 @@ body {
   // ---------- создание партии ----------
   function create(players, options = {}) {
     const minutes = Number(options.minutes) || 0;
+    const rules = normRules(options.rules);
+    const deal = rules.roles === 'random' ? shuffle(ROLES.map(r => r.id)) : [];
     return migrate({
-      rules: normRules(options.rules),
+      rules,
       round: 0,                // сколько полных кругов ходов прошло
       grow: 1,                 // во сколько раз выросли цены
       v: 2,
-      players: players.map(p => ({
+      players: players.map((p, i) => ({
         name: p.name, color: p.color, figure: p.figure || 'horse',
         money: RULES.startMoney, pos: 0,
         inJail: false, jailTries: 0, freeCards: [], bankrupt: false,
         loan: null,            // { from, principal, owe, laps, due }
+        bot: !!p.bot,          // ходит сам
+        role: rules.roles === 'random' ? deal[i] : null,   // тайная роль (id из data.ROLES)
+        roleUsed: false,       // способность «раз за игру» потрачена
+        roleShown: false,      // роль раскрыта всем
+        trap: false,           // Булчут: засада взведена
       })),
       own: {},                 // номер клетки → { owner, houses, mortgaged } (5 домов = отель)
       turn: 0,
-      phase: 'roll',           // roll | buy | auction | offer | end | debt | over
+      phase: rules.roles === 'pick' ? 'roles' : 'roll',   // roles | roll | omen | buy | pick2 | auction | offer | end | debt | over
       dice: null,
       doubles: 0,
       extra: false,            // выпал дубль — после хода бросаешь ещё
@@ -1235,6 +1306,7 @@ body {
         tyusyulge: shuffle(TYUSYULGE.map((_, i) => i)),
       },
       card: null,              // последняя вытянутая карточка
+      choice: null,            // Булчут: две карточки на выбор { deck, ids }
       log: [],
       seq: 0,                  // счётчик изменений — экран по нему понимает, что перерисовать
       endsAt: minutes ? Date.now() + minutes * 60000 : 0,
@@ -1254,7 +1326,12 @@ body {
     s.auction = s.auction || null;
     s.auctionQueue = s.auctionQueue || [];
     s.offer = s.offer || null;
-    s.players.forEach(p => { if (p.loan === undefined) p.loan = null; });
+    s.choice = s.choice || null;
+    s.players.forEach(p => {
+      if (p.loan === undefined) p.loan = null;
+      if (p.role === undefined) Object.assign(p, { role: null, roleUsed: false, roleShown: false, trap: false });
+      p.bot = !!p.bot;
+    });
     for (const k in s.own) if (s.own[k].mortgaged === undefined) s.own[k].mortgaged = false;
     return s;
   }
@@ -1266,6 +1343,7 @@ body {
 
   // Кто сейчас должен действовать
   function actor(s) {
+    if (s.phase === 'roles') { const i = s.players.findIndex(p => !p.role); return i < 0 ? s.turn : i; }
     if (s.phase === 'auction' && s.auction) return s.auction.at;
     if (s.phase === 'offer' && s.offer) return s.offer.to;
     return s.turn;
@@ -1275,6 +1353,16 @@ body {
     s.log.push(text);
     if (s.log.length > 120) s.log.splice(0, s.log.length - 120);
   }
+
+  // ---------- тайные роли ----------
+  const has = (s, p, id) => p >= 0 && !!s.players[p] && s.players[p].role === id && !s.players[p].bankrupt;
+  // роль сработала — раскрываем её всем
+  function reveal(s, p, what) {
+    const pl = s.players[p], r = ROLE[pl.role];
+    pl.roleShown = true;
+    log(s, `🎭 ${pl.name} — ${r.name}: ${what}`);
+  }
+  const x15 = n => Math.round(n * 1.5);
 
   function groupCells(g) {
     const out = [];
@@ -1297,7 +1385,8 @@ body {
   // Цены с учётом роста («долгая партия»). Залог и продажа домов — по исходной цене.
   const up = (s, n) => (s && s.grow > 1 ? Math.round(n * s.grow) : n);
   const price = (s, i) => up(s, BOARD[i].price);
-  const houseCost = (s, g) => up(s, GROUPS[g].house);
+  // p — кто строит: Уус строит на 20% дешевле
+  const houseCost = (s, g, p) => { const c = up(s, GROUPS[g].house); return has(s, p, 'uus') ? Math.round(c * 0.8) : c; };
   const taxOf = (s, i) => up(s, BOARD[i].amount || 0);
   const prizeOn = s => s.rules.prize !== 'off';
 
@@ -1310,9 +1399,13 @@ body {
   function rentFor(s, i, opts = {}) {
     const c = BOARD[i], o = s.own[i];
     if (!o || o.mortgaged) return 0;
-    if (c.type === 'prop') return baseRent(s, i, o.houses, ownsGroup(s, o.owner, c.group));
+    if (c.type === 'prop') {
+      const r = baseRent(s, i, o.houses, ownsGroup(s, o.owner, c.group));
+      return o.houses === 0 && has(s, o.owner, 'toyon') ? Math.round(r * 0.9) : r;
+    }
     if (c.type === 'transport') {
-      return up(s, RULES.transportRent[countOwned(s, o.owner, 'transport')] * (opts.mult || 1));
+      const r = up(s, RULES.transportRent[countOwned(s, o.owner, 'transport')] * (opts.mult || 1));
+      return has(s, o.owner, 'kayur') ? x15(r) : r;
     }
     if (c.type === 'utility') {
       const sum = opts.diceSum || (s.dice ? s.dice[0] + s.dice[1] : 7);
@@ -1368,21 +1461,25 @@ body {
     const cells = groupCells(c.group);
     if (cells.some(j => s.own[j].mortgaged)) return false;
     const min = Math.min(...cells.map(j => s.own[j].houses));
-    return o.houses === min && s.players[p].money >= houseCost(s, c.group);
+    return o.houses === min && s.players[p].money >= houseCost(s, c.group, p);
   }
 
   function canSell(s, p, i) {
     const c = BOARD[i], o = s.own[i];
     if (!c || c.type !== 'prop' || !o || o.owner !== p || o.houses === 0) return false;
-    const max = Math.max(...groupCells(c.group).map(j => s.own[j].houses));
+    const max = Math.max(...groupCells(c.group).map(j => (s.own[j] ? s.own[j].houses : 0)));
     return o.houses === max;
   }
 
-  function sellValue(i) { return Math.floor(GROUPS[BOARD[i].group].house * RULES.sellRate); }
+  // Уус выручает за дом только треть
+  function sellValue(i, s) {
+    const h = GROUPS[BOARD[i].group].house, o = s && s.own[i];
+    return Math.floor(o && has(s, o.owner, 'uus') ? h / 3 : h * RULES.sellRate);
+  }
 
   function doSell(s, p, i) {
+    s.players[p].money += sellValue(i, s);
     s.own[i].houses--;
-    s.players[p].money += sellValue(i);
   }
 
   // Сколько игрок может собрать: продать все дома и заложить все клетки
@@ -1391,7 +1488,7 @@ body {
     for (const k in s.own) {
       const o = s.own[k];
       if (o.owner !== p) continue;
-      if (BOARD[k].type === 'prop') v += o.houses * sellValue(k);
+      if (BOARD[k].type === 'prop') v += o.houses * sellValue(k, s);
       if (!o.mortgaged) v += mortgageValue(k);
     }
     return v;
@@ -1469,7 +1566,7 @@ body {
     for (const k in s.own) {
       const o = s.own[k];
       if (o.owner !== p) continue;
-      if (BOARD[k].type === 'prop' && o.houses) { pl.money += o.houses * sellValue(k); o.houses = 0; }
+      if (BOARD[k].type === 'prop' && o.houses) { pl.money += o.houses * sellValue(k, s); o.houses = 0; }
       if (to === BANK) { delete s.own[k]; toBank.push(Number(k)); } else o.owner = to;
     }
     if (to === BANK) {
@@ -1509,6 +1606,10 @@ body {
     const pl = s.players[p];
     pl.money += RULES.passStart;
     log(s, `${pl.name} проходит Старт: +${rub(RULES.passStart)}`);
+    if (has(s, p, 'toyon')) {
+      const full = Object.keys(GROUPS).filter(g => ownsGroup(s, p, Number(g))).length;
+      if (full) { pl.money += 25 * full; reveal(s, p, `дань с полных групп +${rub(25 * full)}`); }
+    }
     if (pl.loan) {
       pl.loan.laps--;
       if (pl.loan.laps <= 0) pl.loan.due = true;   // спишется, когда фишка остановится
@@ -1549,15 +1650,24 @@ body {
         if (!o) { s.pending = { kind: 'buy', cell: i }; s.phase = 'buy'; return; }
         if (o.owner === p) return;
         if (o.mortgaged) { log(s, `${c.name} в залоге — аренда не берётся`); return; }
-        const rent = rentFor(s, i, opts);
+        let rent = rentFor(s, i, opts);
+        const ow = s.players[o.owner];
+        if (ow.trap && !ow.bankrupt) { ow.trap = false; rent *= 2; reveal(s, o.owner, `засада — аренда вдвойне, ${rub(rent)}`); }
         charge(s, p, o.owner, rent, `аренда: ${c.name} → ${s.players[o.owner].name}`);
         return;
       }
       case 'tax':
+        if (has(s, p, 'atyyhyt')) {
+          const t = x15(taxOf(s, i));
+          reveal(s, p, `налог в полтора раза больше, ${rub(t)}`);
+          charge(s, p, prizeOn(s) ? PRIZE : BANK, t, c.name);
+          return;
+        }
         if (prizeOn(s)) charge(s, p, PRIZE, taxOf(s, i), `${c.name} → в Приз Ысыаха`);
         else charge(s, p, BANK, taxOf(s, i), c.name);
         return;
       case 'parking':
+        if (has(s, p, 'olonkhosut')) { pl.money += 100; reveal(s, p, `сказание на Ысыахе +${rub(100)}`); }
         if (prizeOn(s) && s.prize > 0) {
           pl.money += s.prize;
           log(s, `🎉 ${pl.name} получает Приз Ысыаха: ${rub(s.prize)}`);
@@ -1565,9 +1675,16 @@ body {
         }
         return;
       case 'bayanai': case 'tyusyulge':
+        if (c.type === 'bayanai' && has(s, p, 'bulchut')) {
+          s.choice = { deck: 'bayanai', ids: [s.decks.bayanai.shift(), s.decks.bayanai.shift()] };
+          s.phase = 'pick2';
+          reveal(s, p, 'тянет две карточки «Байанай» и выбирает одну');
+          return;
+        }
         drawCard(s, p, c.type);
         return;
       case 'gotojail':
+        if (has(s, p, 'ojuun')) { reveal(s, p, 'пурга не уносит шамана в зимовьё'); return; }
         sendToJail(s, p);
         return;
       default:
@@ -1575,16 +1692,19 @@ body {
     }
   }
 
-  function drawCard(s, p, deck) {
-    const id = s.decks[deck].shift();
+  function drawCard(s, p, deck, forced) {
+    const id = forced !== undefined ? forced : s.decks[deck].shift();
     const card = DECKS[deck][id];
     if (!card.free) s.decks[deck].push(id);
     s.card = { deck, title: DECK_NAMES[deck], text: card.text, seq: s.seq + 1, player: p };
     log(s, `${DECK_NAMES[deck]}: ${card.text}`);
     const pl = s.players[p];
+    // Ойуун платит по «Тюсюлгэ» в полтора раза больше
+    const k = deck === 'tyusyulge' && has(s, p, 'ojuun') && (card.money < 0 || card.each < 0 || card.repairs) ? 1.5 : 1;
+    if (k > 1) reveal(s, p, 'платит по «Тюсюлгэ» в полтора раза больше');
 
     if (card.money > 0) { pl.money += card.money; return; }
-    if (card.money < 0) { charge(s, p, BANK, -card.money, DECK_NAMES[deck]); return; }
+    if (card.money < 0) { charge(s, p, BANK, Math.round(-card.money * k), DECK_NAMES[deck]); return; }
     if (card.free) { pl.freeCards.push(deck); return; }
     if (card.jail) { sendToJail(s, p); return; }
     if (card.moveTo !== undefined) { moveTo(s, p, card.moveTo); return; }
@@ -1602,7 +1722,7 @@ body {
     }
     if (card.each < 0) {
       const n = alive(s).length - 1;
-      charge(s, p, 'each', -card.each * n, DECK_NAMES[deck]);
+      charge(s, p, 'each', Math.round(-card.each * n * k), DECK_NAMES[deck]);
       return;
     }
     if (card.repairs) {
@@ -1612,7 +1732,7 @@ body {
         if (o.owner !== p || BOARD[k].type !== 'prop') continue;
         if (o.houses === 5) hot++; else h += o.houses;
       }
-      charge(s, p, BANK, h * card.repairs[0] + hot * card.repairs[1], DECK_NAMES[deck]);
+      charge(s, p, BANK, Math.round((h * card.repairs[0] + hot * card.repairs[1]) * k), DECK_NAMES[deck]);
       return;
     }
     if (card.nearest) {
@@ -1632,6 +1752,125 @@ body {
     }
   }
 
+  // Кубики брошены — ход фишки. shown: бросок уже был показан (Ойуун решил идти)
+  function afterRoll(s, p, d, shown) {
+    const pl = s.players[p];
+    const dbl = d[0] === d[1], sum = d[0] + d[1];
+    if (!shown) log(s, `🎲 ${pl.name}: ${d[0]} + ${d[1]}${dbl ? ' — дубль!' : ''}`);
+    else if (dbl) log(s, 'Дубль!');
+
+    if (pl.inJail) {
+      if (dbl && has(s, p, 'kayur')) reveal(s, p, 'дубль не выводит каюра из зимовья');
+      if (dbl && !has(s, p, 'kayur')) {
+        pl.inJail = false; pl.jailTries = 0; s.extra = false;
+        log(s, `Пурга стихла: ${pl.name} выходит из зимовья`);
+        moveBy(s, p, sum);
+      } else {
+        pl.jailTries++;
+        if (pl.jailTries >= RULES.maxJailTries) {
+          pl.inJail = false; pl.jailTries = 0; s.extra = false;
+          charge(s, p, BANK, RULES.jailFine, 'вездеход из зимовья', { move: sum });
+        } else {
+          log(s, `${pl.name} остаётся в зимовье (попытка ${pl.jailTries} из ${RULES.maxJailTries})`);
+        }
+      }
+      s.extra = false;
+      settle(s);
+      return ok();
+    }
+
+    if (dbl) {
+      s.doubles++;
+      if (s.doubles >= 3) {
+        log(s, 'Три дубля подряд — гнал и попал в пургу!');
+        sendToJail(s, p);
+        settle(s);
+        return ok();
+      }
+      s.extra = true;
+    } else s.extra = false;
+    moveBy(s, p, sum);
+    settle(s);
+    return ok();
+  }
+
+  // ---------- способности «раз за игру» ----------
+  function useAbility(s, p, a) {
+    const pl = s.players[p], role = pl.role, calm = s.phase === 'roll' || s.phase === 'end';
+    if (!role || pl.roleUsed) return err('Способность уже потрачена');
+    const done = what => { pl.roleUsed = true; reveal(s, p, what); return ok(); };
+    switch (role) {
+      case 'uus': {
+        if (!calm) return err('Строить можно в начале или в конце хода');
+        const i = int(a.cell), c = BOARD[i], o = s.own[i];
+        if (!c || c.type !== 'prop' || !o || o.owner !== p || o.mortgaged || o.houses) return err('Выберите свой пустой участок не в залоге');
+        if (ownsGroup(s, p, c.group)) return err('Группа уже ваша — стройте как обычно');
+        if (groupCells(c.group).some(j => s.own[j] && s.own[j].mortgaged)) return err('В группе есть заложенная клетка');
+        const cost = houseCost(s, c.group, p);
+        if (pl.money < cost) return err('Не хватает денег');
+        pl.money -= cost; o.houses = 1;
+        return done(`ставит дом без полной группы: ${c.name} (−${rub(cost)})`);
+      }
+      case 'bulchut':
+        if (!calm) return err('Засаду ставят в начале или в конце хода');
+        pl.trap = true; pl.roleUsed = true;
+        log(s, `${pl.name} что-то задумал…`);
+        return ok();
+      case 'atyyhyt': {
+        if (s.phase !== 'auction') return err('Только на аукционе');
+        const A = s.auction;
+        if (pl.money < A.start) return err('Не хватает денег');
+        pl.roleUsed = true;
+        reveal(s, p, `забирает ${BOARD[A.cell].name} по стартовой цене без торгов`);
+        A.leader = p; A.price = A.start;
+        finishAuction(s);
+        return ok();
+      }
+      case 'kayur': {
+        if (s.phase !== 'roll' || pl.inJail) return err('Только вместо броска');
+        const i = int(a.cell);
+        if (!BOARD[i] || BOARD[i].type !== 'transport' || i === pl.pos) return err('Выберите другую клетку транспорта');
+        pl.roleUsed = true;
+        reveal(s, p, `упряжка мчит на ${BOARD[i].name}`);
+        s.dice = null; s.card = null; s.extra = false;
+        moveTo(s, p, i);
+        settle(s);
+        return ok();
+      }
+      case 'toyon': {
+        if (!calm) return err('Сход созывают в начале или в конце хода');
+        pl.roleUsed = true;
+        reveal(s, p, 'созывает сход — каждый платит 30 ₽');
+        alive(s).filter(i => i !== p).forEach(i => {
+          if (s.phase !== 'over' && !s.players[i].bankrupt) charge(s, i, p, 30, 'сход у тойона');
+        });
+        return ok();
+      }
+      case 'olonkhosut': {
+        if (!calm) return err('Только в начале или в конце хода');
+        if (!prizeOn(s) || !s.prize) return err('Приз Ысыаха пуст');
+        const v = s.prize; s.prize = 0; pl.money += v;
+        return done(`сказанием забирает Приз Ысыаха: ${rub(v)}`);
+      }
+    }
+    return err('У этой роли нет такой способности');
+  }
+
+  // Можно ли сейчас применить способность (для экрана и ботов)
+  function canAbility(s, p) {
+    const pl = s.players[p];
+    if (!pl || !pl.role || pl.roleUsed || pl.bankrupt || actor(s) !== p) return false;
+    const calm = s.phase === 'roll' || s.phase === 'end';
+    switch (pl.role) {
+      case 'uus': return calm && Object.keys(s.own).some(k => { const o = s.own[k], c = BOARD[k]; return o.owner === p && c.type === 'prop' && !o.mortgaged && !o.houses && !ownsGroup(s, p, c.group) && !groupCells(c.group).some(j => s.own[j] && s.own[j].mortgaged); });
+      case 'bulchut': case 'toyon': return calm;
+      case 'atyyhyt': return s.phase === 'auction' && pl.money >= s.auction.start;
+      case 'kayur': return s.phase === 'roll' && !pl.inJail;
+      case 'olonkhosut': return calm && prizeOn(s) && s.prize > 0;
+    }
+    return false;
+  }
+
   // Продолжение после оплаты долга
   function runAfter(s, after) {
     if (after && after.move) moveBy(s, s.turn, after.move);
@@ -1639,7 +1878,7 @@ body {
 
   // Ход закончен или можно бросать ещё раз
   function settle(s) {
-    if (['buy', 'debt', 'over', 'auction', 'offer'].includes(s.phase)) return;
+    if (['buy', 'debt', 'over', 'auction', 'offer', 'pick2', 'omen'].includes(s.phase)) return;
     const pl = cur(s);
     // срок кредита наступил — возвращаем, когда фишка остановилась
     if (pl.loan && pl.loan.due && !pl.bankrupt) {
@@ -1678,7 +1917,8 @@ body {
   // ---------- аукцион ----------
   function startAuction(s, cell) {
     const start = Math.max(RULES.bidStep, Math.floor(price(s, cell) * RULES.auctionStart));
-    s.auction = { cell, start, price: 0, leader: null, bidders: alive(s), at: null };
+    const tr = BOARD[cell].type === 'transport';
+    s.auction = { cell, start, price: 0, leader: null, bidders: alive(s).filter(i => !(tr && has(s, i, 'bulchut'))), at: null };
     s.phase = 'auction'; s.pending = null;
     if (s.rules.auction === 'sealed') {
       // тайный: каждый по кругу один раз пишет ставку, потом все открываются
@@ -1765,11 +2005,14 @@ body {
   }
 
   // 10% банку за каждую полученную заложенную клетку
-  const tradeFee = (s, cells) => cells.reduce((n, i) => n + (s.own[i].mortgaged ? mortgageFee(i) : 0), 0);
+  // Атыыһыт обменивается без этой платы
+  const tradeFee = (s, cells, to) => has(s, to, 'atyyhyt') ? 0 : cells.reduce((n, i) => n + (s.own[i].mortgaged ? mortgageFee(i) : 0), 0);
+  const noTransport = (s, p, cells) => has(s, p, 'bulchut') && cells.some(i => BOARD[i].type === 'transport');
 
   function applyTrade(s, o) {
     const A = s.players[o.from], B = s.players[o.to];
-    const feeA = tradeFee(s, o.get.cells), feeB = tradeFee(s, o.give.cells);
+    if (noTransport(s, o.from, o.get.cells) || noTransport(s, o.to, o.give.cells)) return 'Этот игрок не может получить транспорт';
+    const feeA = tradeFee(s, o.get.cells, o.from), feeB = tradeFee(s, o.give.cells, o.to);
     if (A.money - o.give.money + o.get.money < feeA) return `${A.name} не хватит на 10% за заложенные клетки`;
     if (B.money - o.get.money + o.give.money < feeB) return `${B.name} не хватит на 10% за заложенные клетки`;
     o.give.cells.forEach(i => { s.own[i].owner = o.to; });
@@ -1819,42 +2062,50 @@ body {
         if (s.phase !== 'roll') return err('Сейчас нельзя бросать');
         const d = [die(), die()];
         s.dice = d; s.card = null;
-        const dbl = d[0] === d[1], sum = d[0] + d[1];
-        log(s, `🎲 ${pl.name}: ${d[0]} + ${d[1]}${dbl ? ' — дубль!' : ''}`);
-
-        if (pl.inJail) {
-          if (dbl) {
-            pl.inJail = false; pl.jailTries = 0; s.extra = false;
-            log(s, `Пурга стихла: ${pl.name} выходит из зимовья`);
-            moveBy(s, p, sum);
-          } else {
-            pl.jailTries++;
-            if (pl.jailTries >= RULES.maxJailTries) {
-              pl.inJail = false; pl.jailTries = 0; s.extra = false;
-              charge(s, p, BANK, RULES.jailFine, 'вездеход из зимовья', { move: sum });
-            } else {
-              log(s, `${pl.name} остаётся в зимовье (попытка ${pl.jailTries} из ${RULES.maxJailTries})`);
-            }
-          }
-          s.extra = false;
-          settle(s);
+        // Ойуун видит кубики и может один раз перебросить
+        if (has(s, p, 'ojuun') && !pl.roleUsed && !pl.inJail) {
+          s.phase = 'omen';
+          log(s, `🎲 ${pl.name}: ${d[0]} + ${d[1]}`);
           return ok();
         }
+        return afterRoll(s, p, d);
+      }
 
-        if (dbl) {
-          s.doubles++;
-          if (s.doubles >= 3) {
-            log(s, 'Три дубля подряд — гнал и попал в пургу!');
-            sendToJail(s, p);
-            settle(s);
-            return ok();
-          }
-          s.extra = true;
-        } else s.extra = false;
-        moveBy(s, p, sum);
+      case 'go': {
+        if (s.phase !== 'omen') return err('Сейчас нельзя');
+        s.phase = 'roll';
+        return afterRoll(s, p, s.dice, true);
+      }
+
+      case 'reroll': {
+        if (s.phase !== 'omen') return err('Сейчас нельзя');
+        pl.roleUsed = true;
+        reveal(s, p, 'шаманский бросок — кубики брошены заново');
+        const d = [die(), die()];
+        s.dice = d; s.phase = 'roll';
+        return afterRoll(s, p, d);
+      }
+
+      case 'pickRole': {
+        if (s.phase !== 'roles') return err('Роли уже выбраны');
+        if (!ROLE[a.role]) return err('Выберите роль');
+        pl.role = a.role;
+        log(s, `🎭 ${pl.name} выбирает тайную роль`);
+        if (s.players.every(q => q.role)) { s.phase = 'roll'; log(s, 'Роли выбраны — игра начинается'); }
+        return ok();
+      }
+
+      case 'pickCard': {
+        if (s.phase !== 'pick2' || !s.choice) return err('Выбирать нечего');
+        const k = int(a.k) === 1 ? 1 : 0, ch = s.choice;
+        s.decks[ch.deck].push(ch.ids[1 - k]);
+        s.choice = null; s.phase = 'moving';
+        drawCard(s, p, ch.deck, ch.ids[k]);
         settle(s);
         return ok();
       }
+
+      case 'ability': return useAbility(s, p, a);
 
       case 'payJail': {
         if (s.phase !== 'roll' || !pl.inJail) return err('Вы не в зимовье');
@@ -1877,6 +2128,7 @@ body {
       case 'buy': {
         if (s.phase !== 'buy') return err('Нечего покупать');
         const i = s.pending.cell, c = BOARD[i], cost = price(s, i);
+        if (c.type === 'transport' && has(s, p, 'bulchut')) return err('Охотник не покупает транспорт');
         if (pl.money < cost) return err('Не хватает денег');
         pl.money -= cost;
         s.own[i] = { owner: p, houses: 0, mortgaged: false };
@@ -1929,7 +2181,7 @@ body {
       case 'build': {
         if (s.phase !== 'roll' && s.phase !== 'end') return err('Сейчас строить нельзя');
         if (!canBuild(s, p, a.cell)) return err('Здесь строить нельзя');
-        const c = BOARD[a.cell], cost = houseCost(s, c.group);
+        const c = BOARD[a.cell], cost = houseCost(s, c.group, p);
         pl.money -= cost;
         s.own[a.cell].houses++;
         const h = s.own[a.cell].houses;
@@ -1940,9 +2192,9 @@ body {
       case 'sell': {
         if (!['roll', 'end', 'debt', 'buy'].includes(s.phase)) return err('Сейчас продавать нельзя');
         if (!canSell(s, p, a.cell)) return err('Здесь продавать нельзя');
-        const was = s.own[a.cell].houses;
+        const was = s.own[a.cell].houses, gain = sellValue(a.cell, s);
         doSell(s, p, a.cell);
-        log(s, `${pl.name} продаёт ${was === 5 ? 'отель' : 'дом'}: ${BOARD[a.cell].name} (+${rub(sellValue(a.cell))})`);
+        log(s, `${pl.name} продаёт ${was === 5 ? 'отель' : 'дом'}: ${BOARD[a.cell].name} (+${rub(gain)})`);
         return ok();
       }
 
@@ -1987,6 +2239,7 @@ body {
         const amount = int(a.amount);
         const from = a.from === BANK || a.from === undefined ? BANK : int(a.from);
         if (from === BANK) {
+          if (has(s, p, 'olonkhosut')) return err('Банк не даёт кредит сказителю (ваша роль — Олонхосут)');
           const B = RULES.bankLoan;
           if (amount < B.step || amount > B.max || amount % B.step) return err(`Банк даёт от ${rub(B.step)} до ${rub(B.max)}`);
           pl.money += amount;
@@ -2075,6 +2328,7 @@ body {
     liquidValue, sellValue, mortgageValue, mortgageFee, unmortgageCost, canMortgage, canUnmortgage,
     canTradeCell, minBid, describeSide, rub, BANK, PRIZE,
     price, houseCost, taxOf, baseRent, up, normRules, RULE_DEFAULTS, GROW_EVERY,
+    canAbility, ROLE, ROLES,
     setRandom(fn) { rand = fn; },
   };
   root.BAAI = root.BAAI || {};
@@ -5121,11 +5375,17 @@ var qrcode = function() {
     const left = net.deadline ? Math.max(0, net.deadline - Date.now()) : 0;
     // тайный аукцион: гостям уходит только «ставка сделана», без сумм
     const A = G.auction;
-    const gs = JSON.stringify(A && A.sealed ? Object.assign({}, G, { auction: Object.assign({}, A, { bids: Object.fromEntries(Object.keys(A.bids).map(k => [k, A.bids[k] > 0 ? 1 : 0])) }) }) : G), on = JSON.stringify(onlineList()), o = JSON.stringify(opts || {});
+    const base = A && A.sealed ? Object.assign({}, G, { auction: Object.assign({}, A, { bids: Object.fromEntries(Object.keys(A.bids).map(k => [k, A.bids[k] > 0 ? 1 : 0])) }) }) : G;
+    const on = JSON.stringify(onlineList()), o = JSON.stringify(opts || {});
+    // тайные роли: каждому — только своя роль и уже раскрытые
+    const roles = G.rules && G.rules.roles !== 'off' && G.phase !== 'over';
+    const forSeat = i => !roles ? base : Object.assign({}, base, { players: base.players.map((p, k) =>
+      k === i || p.roleShown ? p : Object.assign({}, p, { role: p.role ? 'hidden' : null, roleUsed: false, trap: false })) });
+    const shared = roles ? null : JSON.stringify(base);
     H.seats.forEach((s, i) => {
       const id = seatConn(i);
       if (id === null || s.key === 'host') return;
-      hostSend([id], `{"t":"state","me":${i},"left":${left},"now":${Date.now()},"online":${on},"opts":${o},"G":${gs}}`);
+      hostSend([id], `{"t":"state","me":${i},"left":${left},"now":${Date.now()},"online":${on},"opts":${o},"G":${shared || JSON.stringify(forSeat(i))}}`);
     });
   }
 
@@ -5427,7 +5687,7 @@ var qrcode = function() {
 (function () {
   'use strict';
 
-  const { BOARD, GROUPS, RULES } = BAAI.data;
+  const { BOARD, GROUPS, RULES, ROLES, BAYANAI } = BAAI.data;
   const T = BAAI.theme;
   const E = BAAI.engine;
   const FX = BAAI.fx || { play() {}, vibe() {}, floatText() {}, coins() {}, beads() {}, toggle() {}, sound: false, vibe: false, canVibe: false };
@@ -5479,6 +5739,10 @@ var qrcode = function() {
     { k: 'growth', icon: 'grow', title: 'Цены', opts: [['flat', 'Постоянные'], ['grow', 'Растут']],
       hint: { flat: 'Цены весь матч одни и те же.',
               grow: `Каждые ${E.GROW_EVERY} кругов покупка, аренда, дома и налоги дорожают на 10%, до +50%. Партия не затягивается.` } },
+    { k: 'roles', icon: 'mask', title: 'Тайные роли', opts: [['off', 'Нет'], ['pick', 'Выбор'], ['random', 'Случайно']],
+      hint: { off: 'Все играют по одним правилам.',
+              pick: 'Перед партией каждый втайне выбирает роль: у неё есть плюс, способность раз за игру и минус. Роль раскрывается, когда сработает.',
+              random: 'Роли раздаются случайно и втайне: плюс, способность раз за игру и минус. Роль раскрывается, когда сработает.' } },
     { k: 'prize', icon: 'ysyakh', title: 'Приз Ысыаха', opts: [['on', 'Есть'], ['off', 'Нет']],
       hint: { on: 'Налоги и проценты банку копятся в призе. Кто встал на «Ысыах», забирает всё.',
               off: 'Налоги уходят банку, «Ысыах» — просто отдых.' } },
@@ -5500,6 +5764,48 @@ var qrcode = function() {
     return i === (netGame() ? NET.me : E.actor(G));
   }
   const moneyOf = (i, v) => seesMoney(i) ? rub(v === undefined ? G.players[i].money : v) : '••• ₽';
+
+  // ---------- тайные роли ----------
+  const ROLE_BTN = { uus: 'Дом без группы', bulchut: 'Засада', atyyhyt: 'Забрать по стартовой цене', kayur: 'Упряжка на транспорт', toyon: 'Созвать сход', olonkhosut: 'Забрать приз сказанием' };
+  const roleOf = i => (G.players[i] && E.ROLE[G.players[i].role]) || null;
+  // Чья роль видна этому телефону: своя всегда, чужая — когда раскрыта
+  const seesRole = i => G.players[i].roleShown || G.phase === 'over' || (netGame() ? i === NET.me : i === E.actor(G));
+
+  function roleCardHTML(r, used, act) {
+    return `<div class="role-card">
+      <div class="role-top">${icon(r.icon, T.C.coral, 2)}<div><b>${esc(r.name)}</b><span>${esc(r.who)}</span></div></div>
+      <p class="rp plus">${esc(r.plus)}</p>
+      <p class="rp once${used ? ' used' : ''}">${esc(r.once)}${used ? ' <em>(потрачено)</em>' : ''}</p>
+      <p class="rp minus">${esc(r.minus)}</p>${act || ''}</div>`;
+  }
+
+  function showRole(p) {
+    const r = roleOf(p); if (!r) return;
+    openKind('role', `<p class="sub center">Тайная роль · ${esc(G.players[p].name)}</p>${roleCardHTML(r, G.players[p].roleUsed)}
+      <p class="sub">${G.players[p].roleShown ? 'Роль уже раскрыта — её знают все.' : 'Роль видите только вы. Она раскроется, когда сработает.'}</p>
+      ${btn('Закрыть', 'close', 'ghost')}`);
+  }
+
+  // Выбор клетки для способности (Уус — участок, Каюр — транспорт)
+  function showAbilityCells(p) {
+    const r = roleOf(p), pl = G.players[p];
+    const cells = pl.role === 'kayur' ? [5, 15, 25, 35].filter(i => i !== pl.pos)
+      : Object.keys(G.own).map(Number).filter(i => { const o = G.own[i], c = BOARD[i]; return o.owner === p && c.type === 'prop' && !o.mortgaged && !o.houses && !E.ownsGroup(G, p, c.group); });
+    openKind('ability', `<p class="sub center">${esc(r.name)} · раз за игру</p><h3>${esc(ROLE_BTN[pl.role])}</h3><p>${esc(r.once)}</p>
+      <div class="chips">${cells.map(i => `<button type="button" class="chip" data-act="abilityCell" data-cell="${i}" style="--gc:${cellColor(BOARD[i])}"><i></i>${esc(BOARD[i].name)}</button>`).join('')}</div>
+      ${btn('Отмена', 'close', 'ghost')}`);
+  }
+
+  function abilityBtn() {
+    const p = E.actor(G);
+    if (!myMove() || !E.canAbility(G, p)) return '';
+    return `<div class="act-row">${btn(`${icon('mask', 'currentColor', 2)}${esc(ROLE_BTN[G.players[p].role])}`, 'ability', 'sm ic role-btn')}</div>`;
+  }
+
+  function rolesPickHTML() {
+    return `<div class="notice">Выберите тайную роль. Её видите только вы, она раскроется, когда сработает.</div>
+      <div class="roles-pick">${ROLES.map(r => roleCardHTML(r, false, btn(`Я — ${esc(r.name)}`, 'pickRole', 'primary', false, `data-role="${r.id}"`))).join('')}</div>`;
+  }
 
   // ---------- настройка партии ----------
   function renderSetup() {
@@ -5556,6 +5862,7 @@ var qrcode = function() {
     shownCard = 0;
     save();
     showGame(true);
+    if (G.phase === 'roles') showHandoff();
   }
 
   function showGame(fresh) {
@@ -5594,6 +5901,9 @@ var qrcode = function() {
     else if (G.phase === 'offer') msg = G.offer.kind === 'trade' ? 'Ответ на обмен' : 'Ответ на просьбу о кредите';
     else if (G.phase === 'buy') msg = `${BOARD[G.pending.cell].name}: можно купить`;
     else if (G.phase === 'debt') msg = `Нужно заплатить ${rub(G.pending.amount)}`;
+    else if (G.phase === 'roles') msg = 'Выбирает тайную роль';
+    else if (G.phase === 'omen') msg = 'Шаманский бросок: идти или перебросить';
+    else if (G.phase === 'pick2') msg = 'Выбирает карточку «Байанай»';
     else if (G.phase === 'roll' && pl.inJail) msg = 'Пережидает пургу в зимовье';
     else if (G.phase === 'roll' && G.extra) msg = 'Дубль! Бросай ещё раз';
     else if (G.phase === 'roll') msg = 'Бросай кубики';
@@ -5694,6 +6004,7 @@ var qrcode = function() {
   function waitHTML() {
     const who = E.actor(G), pl = G.players[who];
     if (G.phase === 'auction') return auctionHTML(true);
+    if (G.phase === 'roles') return `<div class="notice wait"><b>${esc(pl.name)}</b> выбирает тайную роль.</div>`;
     if (G.phase === 'offer') {
       const o = G.offer;
       return `<div class="notice">${esc(pl.name)} ${o.kind === 'trade' ? `решает, меняться ли с игроком ${esc(G.players[o.from].name)}` : `решает, дать ли в долг игроку ${esc(G.players[o.from].name)}`}.${leftHTML()}</div>`;
@@ -5716,8 +6027,17 @@ var qrcode = function() {
       h += `<div class="notice">Победитель: <b>${esc(w.name)}</b>${G.overReason === 'time' ? ` — самый богатый (${rub(E.netWorth(G, G.winner))})` : ''}</div>`;
       if (NET.isClient()) h += '<p class="sub center">Новую партию начнёт хост.</p>';
       else h += `<div class="act-row">${btn('Новая партия', 'newGame', 'primary big')}</div>`;
+    } else if (G.phase === 'roles') {
+      h += rolesPickHTML();
+    } else if (G.phase === 'omen') {
+      const d = G.dice;
+      h += `<div class="notice">${icon('drum', T.C.coral, 2)} Шаманский бросок: выпало <b>${d[0]} + ${d[1]}</b> — клетка <b>${esc(BOARD[(pl.pos + d[0] + d[1]) % 40].name)}</b>. Идти или перебросить? Переброс — один раз за игру, после него роль раскроется.</div>
+        <div class="act-row">${btn(`Идти на ${d[0] + d[1]}`, 'go', 'primary big')}${btn('Перебросить', 'reroll', 'big')}</div>`;
+    } else if (G.phase === 'pick2' && G.choice) {
+      h += `<div class="notice">Охотник тянет две карточки «Байанай». Выберите одну, другая уйдёт под низ колоды.</div>
+        <div class="pick2">${G.choice.ids.map((id, k) => `<button type="button" class="card-face bayanai pick" data-act="pickCard" data-k="${k}">${icon('bow', T.C.larch, 2.2)}<p>${esc(BAYANAI[id].text)}</p></button>`).join('')}</div>`;
     } else if (G.phase === 'auction') {
-      h += auctionHTML();
+      h += auctionHTML() + abilityBtn();
     } else if (G.phase === 'offer') {
       h += offerHTML();
     } else if (pl.bankrupt) {
@@ -5729,8 +6049,10 @@ var qrcode = function() {
       h += `<div class="act-row">${btn(G.extra ? 'Бросить ещё раз' : 'Бросить кубики', 'roll', 'primary big')}</div>`;
     } else if (G.phase === 'buy') {
       const c = BOARD[G.pending.cell], cost = E.price(G, G.pending.cell);
-      const short = pl.money < cost;
-      if (short) h += `<div class="notice bad">На ${esc(c.name)} не хватает денег. Можно заложить клетку или взять кредит. Если не купите, клетка уйдёт на аукцион.</div>`;
+      const hunter = c.type === 'transport' && pl.role === 'bulchut';
+      const short = pl.money < cost || hunter;
+      if (hunter) h += `<div class="notice">Охотник не покупает транспорт — клетка уйдёт на аукцион.</div>`;
+      if (short && !hunter) h += `<div class="notice bad">На ${esc(c.name)} не хватает денег. Можно заложить клетку или взять кредит. Если не купите, клетка уйдёт на аукцион.</div>`;
       h += `<div class="act-row">${btn(`Купить ${rub(cost)}`, 'buy', 'primary big', short)}${btn('На аукцион', 'decline', 'big')}</div>`;
       h += `<div class="act-row">${btn('Подробнее о клетке', 'info', 'ghost', false, `data-cell="${G.pending.cell}"`)}</div>`;
     } else if (G.phase === 'debt') {
@@ -5744,7 +6066,8 @@ var qrcode = function() {
     } else if (G.phase === 'end') {
       h += `<div class="act-row">${btn('Завершить ход', 'endTurn', 'dark big')}</div>`;
     }
-    if (G.phase !== 'over' && !pl.bankrupt && G.phase !== 'auction' && G.phase !== 'offer') h += sideRow(pl);
+    if (['roll', 'end'].includes(G.phase) && !pl.bankrupt) h += abilityBtn();
+    if (G.phase !== 'over' && !pl.bankrupt && !['auction', 'offer', 'roles', 'omen', 'pick2'].includes(G.phase)) h += sideRow(pl);
     $('actions').innerHTML = h;
     tickLeft();
   }
@@ -5767,6 +6090,7 @@ var qrcode = function() {
       if (p.loan) tags.push(`долг ${rub(p.loan.owe)}`);
       if (p.freeCards.length) tags.push(`вездеход ×${p.freeCards.length}`);
       if (netGame() && i === NET.me) tags.unshift('вы');
+      if (roleOf(i) && G.players[i].roleShown) tags.push(roleOf(i).name);
       if (netGame() && NET.online && !NET.online[i] && !p.bankrupt) tags.push('нет связи');
       const money = heldMoney && heldMoney[i] !== undefined ? heldMoney[i] : p.money;
       return `<div class="pl${i === E.actor(G) ? ' cur' : ''}${p.bankrupt ? ' out' : ''}">${token(p, 36)}
@@ -5796,6 +6120,8 @@ var qrcode = function() {
     $('assets-title').textContent = netGame() ? 'Ваше имущество' : `Имущество: ${pl.name}`;
     const mine = Object.keys(G.own).map(Number).filter(i => G.own[i].owner === p).sort((a, b) => a - b);
     let h = '';
+    if (roleOf(p)) h += `<div class="asset"><span class="sw" style="--gc:${T.C.ink}">${icon('mask', '#ffffff', 2)}</span>
+      <span class="info" data-act="roleShow" data-p="${p}" role="button" tabindex="0"><b>Тайная роль${pl.roleShown ? ': ' + esc(roleOf(p).name) : ''}</b><span>${pl.roleShown ? 'раскрыта' : 'нажмите, чтобы посмотреть'}${pl.roleUsed ? ' · способность потрачена' : ''}</span></span></div>`;
     if (pl.loan) h += `<div class="asset loan"><span class="sw" style="--gc:${T.C.deep}">${icon('card', '#ffffff', 2.2)}</span>
       <span class="info" data-act="loanOpen" role="button" tabindex="0"><b>Кредит</b><span>${loanLine(pl.loan)}</span></span></div>`;
     if (!mine.length) { $('assets').innerHTML = h + '<p class="empty-note">Пока ничего нет. Покупайте клетки, на которые встаёте.</p>'; return; }
@@ -6211,7 +6537,11 @@ var qrcode = function() {
   function showHandoff() {
     const who = E.actor(G), pl = G.players[who];
     let sub = 'Передайте телефон', what = G.rules.money === 'hidden' ? 'Ваш ход' : rub(pl.money), go = 'Мой ход';
-    if (G.phase === 'auction' && G.auction.sealed) {
+    if (G.phase === 'roles') {
+      sub = 'Тайная роль · остальные не смотрят';
+      what = 'Выберите роль втайне';
+      go = 'Выбрать роль';
+    } else if (G.phase === 'auction' && G.auction.sealed) {
       sub = 'Тайный аукцион · остальные не смотрят';
       what = `${BOARD[G.auction.cell].name}: ставки от ${rub(G.auction.start)}`;
       go = 'Сделать ставку';
@@ -6256,7 +6586,7 @@ var qrcode = function() {
     const r = E.act(G, a);
     if (!r.ok) return r;
     save();
-    const opts = { rolled: a.type === 'roll', turnChanged: G.turn !== before };
+    const opts = { rolled: a.type === 'roll' || a.type === 'reroll', turnChanged: G.turn !== before };
     if (netGame()) NET.publish(opts);
     afterChange(opts, a, actorBefore, !!(how && how.remote));
     return r;
@@ -6359,6 +6689,19 @@ var qrcode = function() {
       case 'loanRepay': send('repayLoan'); return;
 
       case 'bid': send('bid', { amount: num('amount') }); return;
+      case 'roleShow': showRole(num('p')); return;
+      case 'pickRole': send('pickRole', { role: t.dataset.role }); return;
+      case 'pickCard': send('pickCard', { k: num('k') }); return;
+      case 'ability': {
+        const p = E.actor(G), role = G.players[p].role;
+        if (role === 'uus' || role === 'kayur') { showAbilityCells(p); return; }
+        openKind('ask', `<p class="sub center">${esc(roleOf(p).name)} · раз за игру</p><h3>${esc(ROLE_BTN[role])}?</h3><p>${esc(roleOf(p).once)}</p>
+          ${role === 'bulchut' ? '<p class="sub">Засада тайная: роль раскроется, когда сработает.</p>' : '<p class="sub">После этого ваша роль раскроется всем.</p>'}
+          ${btn('Да', 'abilityGo', 'primary big')}${btn('Отмена', 'close', 'ghost')}`);
+        return;
+      }
+      case 'abilityGo': send('ability'); return;
+      case 'abilityCell': send('ability', { cell }); return;
       case 'sealedSet': { const el = $('sealed-bid'); if (el) el.value = num('v'); return; }
       case 'sealedBid': { const el = $('sealed-bid'); send('bid', { amount: Math.floor(Number(el && el.value) || 0) }); return; }
       default:

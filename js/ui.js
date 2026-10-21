@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const { BOARD, GROUPS, RULES } = BAAI.data;
+  const { BOARD, GROUPS, RULES, ROLES, BAYANAI } = BAAI.data;
   const T = BAAI.theme;
   const E = BAAI.engine;
   const FX = BAAI.fx || { play() {}, vibe() {}, floatText() {}, coins() {}, beads() {}, toggle() {}, sound: false, vibe: false, canVibe: false };
@@ -57,6 +57,10 @@
     { k: 'growth', icon: 'grow', title: 'Цены', opts: [['flat', 'Постоянные'], ['grow', 'Растут']],
       hint: { flat: 'Цены весь матч одни и те же.',
               grow: `Каждые ${E.GROW_EVERY} кругов покупка, аренда, дома и налоги дорожают на 10%, до +50%. Партия не затягивается.` } },
+    { k: 'roles', icon: 'mask', title: 'Тайные роли', opts: [['off', 'Нет'], ['pick', 'Выбор'], ['random', 'Случайно']],
+      hint: { off: 'Все играют по одним правилам.',
+              pick: 'Перед партией каждый втайне выбирает роль: у неё есть плюс, способность раз за игру и минус. Роль раскрывается, когда сработает.',
+              random: 'Роли раздаются случайно и втайне: плюс, способность раз за игру и минус. Роль раскрывается, когда сработает.' } },
     { k: 'prize', icon: 'ysyakh', title: 'Приз Ысыаха', opts: [['on', 'Есть'], ['off', 'Нет']],
       hint: { on: 'Налоги и проценты банку копятся в призе. Кто встал на «Ысыах», забирает всё.',
               off: 'Налоги уходят банку, «Ысыах» — просто отдых.' } },
@@ -78,6 +82,48 @@
     return i === (netGame() ? NET.me : E.actor(G));
   }
   const moneyOf = (i, v) => seesMoney(i) ? rub(v === undefined ? G.players[i].money : v) : '••• ₽';
+
+  // ---------- тайные роли ----------
+  const ROLE_BTN = { uus: 'Дом без группы', bulchut: 'Засада', atyyhyt: 'Забрать по стартовой цене', kayur: 'Упряжка на транспорт', toyon: 'Созвать сход', olonkhosut: 'Забрать приз сказанием' };
+  const roleOf = i => (G.players[i] && E.ROLE[G.players[i].role]) || null;
+  // Чья роль видна этому телефону: своя всегда, чужая — когда раскрыта
+  const seesRole = i => G.players[i].roleShown || G.phase === 'over' || (netGame() ? i === NET.me : i === E.actor(G));
+
+  function roleCardHTML(r, used, act) {
+    return `<div class="role-card">
+      <div class="role-top">${icon(r.icon, T.C.coral, 2)}<div><b>${esc(r.name)}</b><span>${esc(r.who)}</span></div></div>
+      <p class="rp plus">${esc(r.plus)}</p>
+      <p class="rp once${used ? ' used' : ''}">${esc(r.once)}${used ? ' <em>(потрачено)</em>' : ''}</p>
+      <p class="rp minus">${esc(r.minus)}</p>${act || ''}</div>`;
+  }
+
+  function showRole(p) {
+    const r = roleOf(p); if (!r) return;
+    openKind('role', `<p class="sub center">Тайная роль · ${esc(G.players[p].name)}</p>${roleCardHTML(r, G.players[p].roleUsed)}
+      <p class="sub">${G.players[p].roleShown ? 'Роль уже раскрыта — её знают все.' : 'Роль видите только вы. Она раскроется, когда сработает.'}</p>
+      ${btn('Закрыть', 'close', 'ghost')}`);
+  }
+
+  // Выбор клетки для способности (Уус — участок, Каюр — транспорт)
+  function showAbilityCells(p) {
+    const r = roleOf(p), pl = G.players[p];
+    const cells = pl.role === 'kayur' ? [5, 15, 25, 35].filter(i => i !== pl.pos)
+      : Object.keys(G.own).map(Number).filter(i => { const o = G.own[i], c = BOARD[i]; return o.owner === p && c.type === 'prop' && !o.mortgaged && !o.houses && !E.ownsGroup(G, p, c.group); });
+    openKind('ability', `<p class="sub center">${esc(r.name)} · раз за игру</p><h3>${esc(ROLE_BTN[pl.role])}</h3><p>${esc(r.once)}</p>
+      <div class="chips">${cells.map(i => `<button type="button" class="chip" data-act="abilityCell" data-cell="${i}" style="--gc:${cellColor(BOARD[i])}"><i></i>${esc(BOARD[i].name)}</button>`).join('')}</div>
+      ${btn('Отмена', 'close', 'ghost')}`);
+  }
+
+  function abilityBtn() {
+    const p = E.actor(G);
+    if (!myMove() || !E.canAbility(G, p)) return '';
+    return `<div class="act-row">${btn(`${icon('mask', 'currentColor', 2)}${esc(ROLE_BTN[G.players[p].role])}`, 'ability', 'sm ic role-btn')}</div>`;
+  }
+
+  function rolesPickHTML() {
+    return `<div class="notice">Выберите тайную роль. Её видите только вы, она раскроется, когда сработает.</div>
+      <div class="roles-pick">${ROLES.map(r => roleCardHTML(r, false, btn(`Я — ${esc(r.name)}`, 'pickRole', 'primary', false, `data-role="${r.id}"`))).join('')}</div>`;
+  }
 
   // ---------- настройка партии ----------
   function renderSetup() {
@@ -134,6 +180,7 @@
     shownCard = 0;
     save();
     showGame(true);
+    if (G.phase === 'roles') showHandoff();
   }
 
   function showGame(fresh) {
@@ -172,6 +219,9 @@
     else if (G.phase === 'offer') msg = G.offer.kind === 'trade' ? 'Ответ на обмен' : 'Ответ на просьбу о кредите';
     else if (G.phase === 'buy') msg = `${BOARD[G.pending.cell].name}: можно купить`;
     else if (G.phase === 'debt') msg = `Нужно заплатить ${rub(G.pending.amount)}`;
+    else if (G.phase === 'roles') msg = 'Выбирает тайную роль';
+    else if (G.phase === 'omen') msg = 'Шаманский бросок: идти или перебросить';
+    else if (G.phase === 'pick2') msg = 'Выбирает карточку «Байанай»';
     else if (G.phase === 'roll' && pl.inJail) msg = 'Пережидает пургу в зимовье';
     else if (G.phase === 'roll' && G.extra) msg = 'Дубль! Бросай ещё раз';
     else if (G.phase === 'roll') msg = 'Бросай кубики';
@@ -272,6 +322,7 @@
   function waitHTML() {
     const who = E.actor(G), pl = G.players[who];
     if (G.phase === 'auction') return auctionHTML(true);
+    if (G.phase === 'roles') return `<div class="notice wait"><b>${esc(pl.name)}</b> выбирает тайную роль.</div>`;
     if (G.phase === 'offer') {
       const o = G.offer;
       return `<div class="notice">${esc(pl.name)} ${o.kind === 'trade' ? `решает, меняться ли с игроком ${esc(G.players[o.from].name)}` : `решает, дать ли в долг игроку ${esc(G.players[o.from].name)}`}.${leftHTML()}</div>`;
@@ -294,8 +345,17 @@
       h += `<div class="notice">Победитель: <b>${esc(w.name)}</b>${G.overReason === 'time' ? ` — самый богатый (${rub(E.netWorth(G, G.winner))})` : ''}</div>`;
       if (NET.isClient()) h += '<p class="sub center">Новую партию начнёт хост.</p>';
       else h += `<div class="act-row">${btn('Новая партия', 'newGame', 'primary big')}</div>`;
+    } else if (G.phase === 'roles') {
+      h += rolesPickHTML();
+    } else if (G.phase === 'omen') {
+      const d = G.dice;
+      h += `<div class="notice">${icon('drum', T.C.coral, 2)} Шаманский бросок: выпало <b>${d[0]} + ${d[1]}</b> — клетка <b>${esc(BOARD[(pl.pos + d[0] + d[1]) % 40].name)}</b>. Идти или перебросить? Переброс — один раз за игру, после него роль раскроется.</div>
+        <div class="act-row">${btn(`Идти на ${d[0] + d[1]}`, 'go', 'primary big')}${btn('Перебросить', 'reroll', 'big')}</div>`;
+    } else if (G.phase === 'pick2' && G.choice) {
+      h += `<div class="notice">Охотник тянет две карточки «Байанай». Выберите одну, другая уйдёт под низ колоды.</div>
+        <div class="pick2">${G.choice.ids.map((id, k) => `<button type="button" class="card-face bayanai pick" data-act="pickCard" data-k="${k}">${icon('bow', T.C.larch, 2.2)}<p>${esc(BAYANAI[id].text)}</p></button>`).join('')}</div>`;
     } else if (G.phase === 'auction') {
-      h += auctionHTML();
+      h += auctionHTML() + abilityBtn();
     } else if (G.phase === 'offer') {
       h += offerHTML();
     } else if (pl.bankrupt) {
@@ -307,8 +367,10 @@
       h += `<div class="act-row">${btn(G.extra ? 'Бросить ещё раз' : 'Бросить кубики', 'roll', 'primary big')}</div>`;
     } else if (G.phase === 'buy') {
       const c = BOARD[G.pending.cell], cost = E.price(G, G.pending.cell);
-      const short = pl.money < cost;
-      if (short) h += `<div class="notice bad">На ${esc(c.name)} не хватает денег. Можно заложить клетку или взять кредит. Если не купите, клетка уйдёт на аукцион.</div>`;
+      const hunter = c.type === 'transport' && pl.role === 'bulchut';
+      const short = pl.money < cost || hunter;
+      if (hunter) h += `<div class="notice">Охотник не покупает транспорт — клетка уйдёт на аукцион.</div>`;
+      if (short && !hunter) h += `<div class="notice bad">На ${esc(c.name)} не хватает денег. Можно заложить клетку или взять кредит. Если не купите, клетка уйдёт на аукцион.</div>`;
       h += `<div class="act-row">${btn(`Купить ${rub(cost)}`, 'buy', 'primary big', short)}${btn('На аукцион', 'decline', 'big')}</div>`;
       h += `<div class="act-row">${btn('Подробнее о клетке', 'info', 'ghost', false, `data-cell="${G.pending.cell}"`)}</div>`;
     } else if (G.phase === 'debt') {
@@ -322,7 +384,8 @@
     } else if (G.phase === 'end') {
       h += `<div class="act-row">${btn('Завершить ход', 'endTurn', 'dark big')}</div>`;
     }
-    if (G.phase !== 'over' && !pl.bankrupt && G.phase !== 'auction' && G.phase !== 'offer') h += sideRow(pl);
+    if (['roll', 'end'].includes(G.phase) && !pl.bankrupt) h += abilityBtn();
+    if (G.phase !== 'over' && !pl.bankrupt && !['auction', 'offer', 'roles', 'omen', 'pick2'].includes(G.phase)) h += sideRow(pl);
     $('actions').innerHTML = h;
     tickLeft();
   }
@@ -345,6 +408,7 @@
       if (p.loan) tags.push(`долг ${rub(p.loan.owe)}`);
       if (p.freeCards.length) tags.push(`вездеход ×${p.freeCards.length}`);
       if (netGame() && i === NET.me) tags.unshift('вы');
+      if (roleOf(i) && G.players[i].roleShown) tags.push(roleOf(i).name);
       if (netGame() && NET.online && !NET.online[i] && !p.bankrupt) tags.push('нет связи');
       const money = heldMoney && heldMoney[i] !== undefined ? heldMoney[i] : p.money;
       return `<div class="pl${i === E.actor(G) ? ' cur' : ''}${p.bankrupt ? ' out' : ''}">${token(p, 36)}
@@ -374,6 +438,8 @@
     $('assets-title').textContent = netGame() ? 'Ваше имущество' : `Имущество: ${pl.name}`;
     const mine = Object.keys(G.own).map(Number).filter(i => G.own[i].owner === p).sort((a, b) => a - b);
     let h = '';
+    if (roleOf(p)) h += `<div class="asset"><span class="sw" style="--gc:${T.C.ink}">${icon('mask', '#ffffff', 2)}</span>
+      <span class="info" data-act="roleShow" data-p="${p}" role="button" tabindex="0"><b>Тайная роль${pl.roleShown ? ': ' + esc(roleOf(p).name) : ''}</b><span>${pl.roleShown ? 'раскрыта' : 'нажмите, чтобы посмотреть'}${pl.roleUsed ? ' · способность потрачена' : ''}</span></span></div>`;
     if (pl.loan) h += `<div class="asset loan"><span class="sw" style="--gc:${T.C.deep}">${icon('card', '#ffffff', 2.2)}</span>
       <span class="info" data-act="loanOpen" role="button" tabindex="0"><b>Кредит</b><span>${loanLine(pl.loan)}</span></span></div>`;
     if (!mine.length) { $('assets').innerHTML = h + '<p class="empty-note">Пока ничего нет. Покупайте клетки, на которые встаёте.</p>'; return; }
@@ -789,7 +855,11 @@
   function showHandoff() {
     const who = E.actor(G), pl = G.players[who];
     let sub = 'Передайте телефон', what = G.rules.money === 'hidden' ? 'Ваш ход' : rub(pl.money), go = 'Мой ход';
-    if (G.phase === 'auction' && G.auction.sealed) {
+    if (G.phase === 'roles') {
+      sub = 'Тайная роль · остальные не смотрят';
+      what = 'Выберите роль втайне';
+      go = 'Выбрать роль';
+    } else if (G.phase === 'auction' && G.auction.sealed) {
       sub = 'Тайный аукцион · остальные не смотрят';
       what = `${BOARD[G.auction.cell].name}: ставки от ${rub(G.auction.start)}`;
       go = 'Сделать ставку';
@@ -834,7 +904,7 @@
     const r = E.act(G, a);
     if (!r.ok) return r;
     save();
-    const opts = { rolled: a.type === 'roll', turnChanged: G.turn !== before };
+    const opts = { rolled: a.type === 'roll' || a.type === 'reroll', turnChanged: G.turn !== before };
     if (netGame()) NET.publish(opts);
     afterChange(opts, a, actorBefore, !!(how && how.remote));
     return r;
@@ -937,6 +1007,19 @@
       case 'loanRepay': send('repayLoan'); return;
 
       case 'bid': send('bid', { amount: num('amount') }); return;
+      case 'roleShow': showRole(num('p')); return;
+      case 'pickRole': send('pickRole', { role: t.dataset.role }); return;
+      case 'pickCard': send('pickCard', { k: num('k') }); return;
+      case 'ability': {
+        const p = E.actor(G), role = G.players[p].role;
+        if (role === 'uus' || role === 'kayur') { showAbilityCells(p); return; }
+        openKind('ask', `<p class="sub center">${esc(roleOf(p).name)} · раз за игру</p><h3>${esc(ROLE_BTN[role])}?</h3><p>${esc(roleOf(p).once)}</p>
+          ${role === 'bulchut' ? '<p class="sub">Засада тайная: роль раскроется, когда сработает.</p>' : '<p class="sub">После этого ваша роль раскроется всем.</p>'}
+          ${btn('Да', 'abilityGo', 'primary big')}${btn('Отмена', 'close', 'ghost')}`);
+        return;
+      }
+      case 'abilityGo': send('ability'); return;
+      case 'abilityCell': send('ability', { cell }); return;
       case 'sealedSet': { const el = $('sealed-bid'); if (el) el.value = num('v'); return; }
       case 'sealedBid': { const el = $('sealed-bid'); send('bid', { amount: Math.floor(Number(el && el.value) || 0) }); return; }
       default:

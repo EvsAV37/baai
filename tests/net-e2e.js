@@ -25,11 +25,12 @@ const state = p => p.page.evaluate(() => {
   const n = BAAI.net, G = n.ui.getState();
   if (!G) return null;
   const bids = G.auction && G.auction.bids ? Object.values(G.auction.bids) : [];
-  const json = JSON.stringify(G, (k, v) => (k === 'bids' ? undefined : v));
-  return { seq: G.seq, phase: G.phase, json, me: n.me, actor: BAAI.engine.actor(G), bigBid: bids.some(v => v > 1), rules: G.rules };
+  const json = JSON.stringify(G, (k, v) => (['bids', 'role', 'roleUsed', 'trap'].includes(k) ? undefined : v));
+  const foreignRole = G.players.some((p, i) => i !== n.me && !p.roleShown && p.role && p.role !== 'hidden' && G.phase !== 'over' && n.me !== 0);
+  return { seq: G.seq, phase: G.phase, json, me: n.me, actor: BAAI.engine.actor(G), bigBid: bids.some(v => v > 1), rules: G.rules, foreignRole };
 });
 
-// RULES=sealed — партия с тайным аукционом, скрытыми деньгами и ростом цен
+// RULES=sealed — партия с тайным аукционом, скрытыми деньгами, ростом цен и выбором тайных ролей
 const SEALED = process.env.RULES === 'sealed';
 
 // Один шаг бота: если сейчас действует этот телефон — нажать подходящую кнопку
@@ -74,7 +75,7 @@ async function step(p) {
     const lobbyText = await host.page.locator('#lobby').innerText();
     if (!lobbyText.includes('Айаал')) fail('хост не видит новое имя игрока');
     if (SEALED) {
-      for (const [k, v] of [['auction', 'sealed'], ['money', 'hidden'], ['growth', 'grow']]) await host.page.click(`[data-nrule="${k}"][data-v="${v}"]`);
+      for (const [k, v] of [['auction', 'sealed'], ['money', 'hidden'], ['growth', 'grow'], ['roles', 'pick']]) await host.page.click(`[data-nrule="${k}"][data-v="${v}"]`);
       await sleep(500);
       if (!(await a.page.locator('#lobby').innerText()).includes('Тайный')) fail('гость не видит выбранные правила');
     }
@@ -86,7 +87,7 @@ async function step(p) {
     let actions = 0, reconnected = false, timerChecked = false;
     for (let k = 0; k < 900 && actions < 260; k++) {
       for (const p of phones) { const r = await step(p); if (r && r !== 'none') actions++; }
-      if (SEALED && k % 10 === 0) for (const p of [a, b]) { const s = await state(p); if (s && s.bigBid) fail(`${p.name}: видит суммы тайных ставок`); if (s && s.rules.auction !== 'sealed') fail('правила не дошли до гостя'); }
+      if (SEALED && k % 10 === 0) for (const p of [a, b]) { const s = await state(p); if (s && s.bigBid) fail(`${p.name}: видит суммы тайных ставок`); if (s && s.rules.auction !== 'sealed') fail('правила не дошли до гостя'); if (s && s.foreignRole) fail(`${p.name}: видит чужую тайную роль`); }
       await sleep(60);
       // переподключение: игрок Б закрывает страницу и открывает снова
       if (!reconnected && actions > 60) {

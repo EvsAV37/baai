@@ -441,3 +441,26 @@ body {
 .rule .hint { margin-top: 6px; font-size: 13px; line-height: 1.3; }
 .rule-v { font-weight: 700; margin: 0; }
 .bid-in { margin: 10px 0 4px; }
+
+/* ---------- тайные роли ---------- */
+.roles-pick { display: flex; flex-direction: column; gap: 10px; }
+.role-card { background: var(--paper); border: 2px solid var(--ink); border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.role-top { display: flex; align-items: center; gap: 10px; }
+.role-top svg { width: 34px; height: 34px; flex: none; }
+.role-top div { display: flex; flex-direction: column; line-height: 1.1; }
+.role-top b { font-family: var(--f-display); font-size: 22px; }
+.role-top span { color: var(--muted); font-size: 14px; }
+.rp { margin: 0; padding-left: 22px; position: relative; font-size: 15px; line-height: 1.3; }
+.rp::before { position: absolute; left: 0; top: 0; width: 16px; height: 16px; margin-top: 1px; border-radius: 50%;
+  color: #fff; font-size: 12px; font-weight: 700; line-height: 16px; text-align: center; }
+.rp.plus::before { content: "+"; background: var(--larch); }
+.rp.once::before { content: "1"; background: var(--coral); }
+.rp.minus::before { content: "−"; background: var(--ink); }
+.rp.used { color: var(--muted); text-decoration: line-through; }
+.rp.used em { text-decoration: none; font-style: normal; }
+.role-card .btn { margin-top: 4px; }
+.btn.role-btn { width: 100%; border-style: dashed; border-color: var(--coral); color: var(--coral); background: var(--paper); }
+.pick2 { display: flex; flex-direction: column; gap: 10px; }
+.card-face.pick { font: inherit; color: var(--ink); cursor: pointer; min-height: 120px; width: 100%; animation: none; }
+.card-face.pick p { font-size: 18px; }
+.notice > svg { width: 20px; height: 20px; vertical-align: -4px; }

@@ -182,11 +182,17 @@
     const left = net.deadline ? Math.max(0, net.deadline - Date.now()) : 0;
     // тайный аукцион: гостям уходит только «ставка сделана», без сумм
     const A = G.auction;
-    const gs = JSON.stringify(A && A.sealed ? Object.assign({}, G, { auction: Object.assign({}, A, { bids: Object.fromEntries(Object.keys(A.bids).map(k => [k, A.bids[k] > 0 ? 1 : 0])) }) }) : G), on = JSON.stringify(onlineList()), o = JSON.stringify(opts || {});
+    const base = A && A.sealed ? Object.assign({}, G, { auction: Object.assign({}, A, { bids: Object.fromEntries(Object.keys(A.bids).map(k => [k, A.bids[k] > 0 ? 1 : 0])) }) }) : G;
+    const on = JSON.stringify(onlineList()), o = JSON.stringify(opts || {});
+    // тайные роли: каждому — только своя роль и уже раскрытые
+    const roles = G.rules && G.rules.roles !== 'off' && G.phase !== 'over';
+    const forSeat = i => !roles ? base : Object.assign({}, base, { players: base.players.map((p, k) =>
+      k === i || p.roleShown ? p : Object.assign({}, p, { role: p.role ? 'hidden' : null, roleUsed: false, trap: false })) });
+    const shared = roles ? null : JSON.stringify(base);
     H.seats.forEach((s, i) => {
       const id = seatConn(i);
       if (id === null || s.key === 'host') return;
-      hostSend([id], `{"t":"state","me":${i},"left":${left},"now":${Date.now()},"online":${on},"opts":${o},"G":${gs}}`);
+      hostSend([id], `{"t":"state","me":${i},"left":${left},"now":${Date.now()},"online":${on},"opts":${o},"G":${shared || JSON.stringify(forSeat(i))}}`);
     });
   }
 
