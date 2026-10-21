@@ -2768,7 +2768,8 @@ body {
   const ang = i => START[i] + SPAN[i] / 2;          // клетка 0 внизу, ход по часовой
 
   const CORNER = { 0: ['СТАРТ', '+200 ₽'], 10: ['ЗИМОВЬЁ', 'в гостях'], 20: ['ЫСЫАХ', 'приз'], 30: ['ПУРГА!', '→ в зимовьё'] };
-  const TOKEN_R = [140, 114, 88];                    // ряды фишек перед клеткой, внутри круга
+  const TOKEN_R = [142];                             // где стоит фишка перед клеткой, внутри круга
+  const TOKEN_STEP = 18, TOKEN_MIN = 84;              // столбик: шаг между фишками и ближе к центру не заходим
   const TOK = 26;
   const FONT = '"PT Sans Narrow", "Roboto Condensed", "Arial Narrow", sans-serif';
 
@@ -2977,25 +2978,19 @@ body {
       g.lineStyle(1.6, hex(C.ink), 1); g.strokePoints(pts, true);
     }
 
-    // ----- фишки: стоят внутри круга перед своей клеткой, по две в ряд -----
+    // ----- фишки: стоят внутри круга перед своей клеткой, столбиком по лучу -----
+    // Первой (ближе всех к клетке и поверх) — фишка того, кто ходит, дальше — по порядку игроков
     slotOf(G, p) {
       const cell = this.shown[p];
-      let k = 0, n = 0;
-      G.players.forEach((pl, q) => {
-        if (pl.bankrupt || this.shown[q] !== cell) return;
-        if (q < p) k++;
-        n++;
-      });
-      return { k, n };
+      const here = G.players.map((_, q) => q).filter(q => !G.players[q].bankrupt && this.shown[q] === cell)
+        .sort((a, b) => (a === G.turn ? -1 : b === G.turn ? 1 : a - b));
+      return { k: Math.max(0, here.indexOf(p)), n: here.length };
     }
 
+    // k-я фишка из n на клетке: на луче клетки, от края круга к центру, внахлёст, как стопка монет
     tokenXY(cell, k, n) {
-      const row = Math.min(2, Math.floor(k / 2));
-      const inRow = Math.min(2, n - row * 2);
-      const off = inRow >= 2 ? (k % 2 ? 14 : -14) : 0;
-      const a = ang(cell), t = rad(a);
-      const [x, y] = polar(TOKEN_R[row], a);
-      return [x - Math.sin(t) * off, y + Math.cos(t) * off];
+      const step = n > 1 ? Math.min(TOKEN_STEP, (TOKEN_R[0] - TOKEN_MIN) / (n - 1)) : 0;
+      return polar(TOKEN_R[0] - k * step, ang(cell));
     }
 
     async ensureTokens(G) {
@@ -3017,7 +3012,7 @@ body {
         const { k, n } = this.slotOf(G, p);
         const [x, y] = this.tokenXY(this.shown[p], k, n);
         if (instant) { s.x = x; s.y = y; } else this.tweens.add({ targets: s, x, y, duration: 180 });
-        s.setDepth(p === G.turn ? 30 : 10 + p);
+        s.setDepth(30 - k);   // ближняя к клетке — сверху
       });
     }
 
