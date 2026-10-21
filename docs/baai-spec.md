@@ -279,6 +279,7 @@
 
 - **Сделано:** этапы 1–5. Игра на одном телефоне и с разных телефонов по Wi-Fi точке доступа, без интернета. APK собирается сам. Звуки, вибрация, анимации, новые рисунки, заставка и иконка.
 - **Репозиторий:** `EvsAV37/baai`, ветка `main`. Игра одним файлом — `dist/baai.html` (собирается `python3 tools/build_single.py`; с `--fragment` — версия для артефакта Claude, Phaser и шрифты тогда грузятся из сети).
+- **Посмотреть с iPhone (страница в Claude, режим на одном телефоне):** https://claude.ai/artifact/AfwYwp1QqJzLkh2Z538RCt — обновляется публикацией `dist/baai-artifact.html` (`python3 tools/build_single.py --fragment`) по этой же ссылке.
 - **APK:** https://github.com/EvsAV37/baai/releases/latest/download/baai.apk (раздел Releases, сборка на каждое изменение).
 - **Проверка:** `node tests/sim.js` — 2000 партий движка; `node tests/net-e2e.js` — сеть в браузере (нужны `npm i ws playwright`).
 - **GitHub Pages:** надо включить в Settings → Pages (ветка `main`, папка `/`), тогда игра для одного телефона будет по адресу https://evsav37.github.io/baai/.
