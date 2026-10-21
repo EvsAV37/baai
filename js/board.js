@@ -14,7 +14,7 @@
   // Мир поля 720×720, центр 360,360. Холст 1080×1080, базовый зум 1.5 — чётко на телефонах.
   const W = 720, CX = 360, CY = 360;
   const CANVAS = 1080, BASE = CANVAS / W;
-  const R = { rimOut: 356, out: 330, band: 306, icon: 292, text: 230, own: 177, inn: 172, dots: 164, center: 156 };
+  const R = { rimOut: 356, out: 330, band: 306, icon: 292, text: 230, own: 168, ownW: 22, flake: 318, inn: 172, dots: 164, center: 156 };
 
   // Угловые клетки вдвое шире обычных
   const SC = 16, SN = (360 - 4 * SC) / 36;
@@ -27,6 +27,7 @@
   const TOKEN_R = [142];                             // где стоит фишка перед клеткой, внутри круга
   const TOKEN_STEP = 22, TOKEN_MIN = 74;              // столбик: шаг между фишками и ближе к центру не заходим
   const TOK = 33;
+  const ICE = 0x1fa9f2;                              // ярко-голубой для снежинки залога
   const FONT = '"PT Sans Narrow", "Roboto Condensed", "Arial Narrow", sans-serif';
 
   const rad = d => d * Math.PI / 180;
@@ -92,7 +93,7 @@
     o.push(`<circle cx="${CX}" cy="${CY}" r="${R.center}" fill="${C.snow}"/>`);
 
     // Аал Луук Мас — дерево жизни, по центру круга
-    o.push(`<g transform="translate(${CX} ${CY + 6}) scale(0.72)">${T.treeSVG()}</g>`);
+    o.push(`<g transform="translate(${CX} ${CY + 6}) scale(0.64)">${T.treeSVG()}</g>`);
     o.push('</svg>');
     return o.join('');
   }
@@ -197,24 +198,16 @@
           const a1 = rad(START[i] + 0.35), a2 = rad(START[i] + SPAN[i] - 0.35);
           f.fillStyle(0xeef5fa, 0.78);
           f.beginPath(); f.arc(CX, CY, R.out, a1, a2, false); f.arc(CX, CY, R.inn, a2, a1, true); f.closePath(); f.fillPath();
-          const [sx, sy] = polar(R.icon - 2, a);
-          f.lineStyle(2.6, hex(C.deep), 0.95);
-          for (let k2 = 0; k2 < 3; k2++) {
-            const t = rad(k2 * 60 + a), cx2 = Math.cos(t), sy2 = Math.sin(t);
-            f.lineBetween(sx - 11 * cx2, sy - 11 * sy2, sx + 11 * cx2, sy + 11 * sy2);
-            for (const e of [-1, 1]) {   // усики на концах лучей
-              const ex = sx + e * 7 * cx2, ey = sy + e * 7 * sy2, t2 = t + e * Math.PI;
-              f.lineBetween(ex, ey, ex + 4 * Math.cos(t2 + 0.7), ey + 4 * Math.sin(t2 + 0.7));
-              f.lineBetween(ex, ey, ex + 4 * Math.cos(t2 - 0.7), ey + 4 * Math.sin(t2 - 0.7));
-            }
-          }
+          // снежинка — на цветной полоске группы у внешнего края (у клеток без полоски — там же)
+          this.snowflake(f, ...polar(R.flake, a), a);
         }
-        g.lineStyle(8, hex(G.players[o.owner].color), o.mortgaged ? 0.4 : 1);
+        // полоса владельца: широкая, заходит на тёмное кольцо к центру
+        g.lineStyle(R.ownW, hex(G.players[o.owner].color), o.mortgaged ? 0.4 : 1);
         g.beginPath(); g.arc(CX, CY, R.own, rad(START[i] + 0.6), rad(START[i] + SPAN[i] - 0.6), false); g.strokePath();
         if (BOARD[i].type === 'prop' && o.houses) {
           const n = o.houses;
-          if (n === 5) this.quad(g, a, 318, 0, 15, 11, hex(C.coral));
-          else for (let h = 0; h < n; h++) this.quad(g, a, 318, (h - (n - 1) / 2) * 1.9, 7.5, 7.5, 0xffffff);
+          if (n === 5) this.balagan(g, a, R.flake);
+          else for (let h = 0; h < n; h++) this.house(g, a + (h - (n - 1) / 2) * 1.9, R.flake);
         }
       }
       this.styleLabels(G);
@@ -270,14 +263,45 @@
       });
     }
 
-    // Прямоугольник на кольце: центр на угле a (+ сдвиг da градусов), радиус r
-    quad(g, a, r, da, w, h, fill) {
-      const c = a + da, t = rad(c), n = [Math.cos(t), Math.sin(t)], tg = [-Math.sin(t), Math.cos(t)];
+    // Фигура на кольце: точки [u, v] — u вдоль кольца, v от центра наружу; центр на угле c, радиус r
+    shape(g, c, r, pts, fill, line) {
+      const t = rad(c), n = [Math.cos(t), Math.sin(t)], tg = [-Math.sin(t), Math.cos(t)];
       const [x, y] = polar(r, c);
-      const pts = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]].map(([u, v]) =>
-        new Phaser.Math.Vector2(x + tg[0] * u + n[0] * v, y + tg[1] * u + n[1] * v));
-      g.fillStyle(fill, 1); g.fillPoints(pts, true);
-      g.lineStyle(1.6, hex(C.ink), 1); g.strokePoints(pts, true);
+      const v2 = pts.map(([u, v]) => new Phaser.Math.Vector2(x + tg[0] * u + n[0] * v, y + tg[1] * u + n[1] * v));
+      g.fillStyle(fill, 1); g.fillPoints(v2, true);
+      if (line !== false) { g.lineStyle(1.4, hex(C.ink), 1); g.strokePoints(v2, true); }
+    }
+
+    // Домик: крыша смотрит к центру круга, как иконки (в приближении стоит прямо)
+    house(g, c, r) {
+      this.shape(g, c, r, [[-4.8, 6.5], [4.8, 6.5], [4.8, -0.5], [0, -6.5], [-4.8, -0.5]], 0xffffff);
+      this.shape(g, c, r, [[-1.4, 6.5], [1.4, 6.5], [1.4, 2.4], [-1.4, 2.4]], hex(C.ink), false);   // дверь
+    }
+
+    // Отель — коралловый балаган: стены сходятся кверху, плоская крыша со снегом, дверь
+    balagan(g, c, r) {
+      this.shape(g, c, r, [[-11, 7.5], [11, 7.5], [8, -3], [-8, -3]], hex(C.coral));
+      this.shape(g, c, r, [[-10, -3], [10, -3], [8.5, -7.5], [-8.5, -7.5]], 0xffffff);
+      this.shape(g, c, r, [[-2, 7.5], [2, 7.5], [2, 1.5], [-2, 1.5]], hex(C.ink), false);
+    }
+
+    // Ярко-голубая снежинка с тонкой белой обводкой
+    snowflake(f, x, y, a) {
+      const rays = (w, col) => {
+        f.lineStyle(w, col, 1);
+        for (let k = 0; k < 3; k++) {
+          const t = rad(k * 60 + a), cx = Math.cos(t), sy = Math.sin(t);
+          f.lineBetween(x - 9 * cx, y - 9 * sy, x + 9 * cx, y + 9 * sy);
+          for (const e of [-1, 1]) {     // усики на концах лучей
+            const ex = x + e * 6 * cx, ey = y + e * 6 * sy, t2 = e > 0 ? t : t + Math.PI;   // веточки смотрят к кончику луча
+            f.lineBetween(ex, ey, ex + 3.6 * Math.cos(t2 + 0.7), ey + 3.6 * Math.sin(t2 + 0.7));
+            f.lineBetween(ex, ey, ex + 3.6 * Math.cos(t2 - 0.7), ey + 3.6 * Math.sin(t2 - 0.7));
+          }
+        }
+      };
+      rays(4.6, 0xffffff);
+      rays(2.4, ICE);
+      f.fillStyle(ICE, 1); f.fillCircle(x, y, 2.2);
     }
 
     // ----- фишки: стоят внутри круга перед своей клеткой, столбиком по лучу -----
@@ -392,7 +416,7 @@
 
     // дом вырос: пыль и кольцо; отель — коралловые искры
     puff(i, hotel) {
-      const [x, y] = polar(318, ang(i));
+      const [x, y] = polar(R.flake, ang(i));
       const ring = this.add.circle(x, y, 8).setStrokeStyle(3, hex(hotel ? C.coral : C.ink)).setDepth(36);
       this.tweens.add({ targets: ring, scale: 4, alpha: 0, duration: 650, ease: 'Cubic.easeOut', onComplete: () => ring.destroy() });
       this.burst(x, y, hotel ? [C.coral, C.gold, '#ffffff'] : ['#ffffff', C.silver, '#ffffff'], hotel ? 18 : 12, hotel ? 58 : 42, 750, 4.5);
