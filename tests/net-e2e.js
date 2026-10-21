@@ -58,7 +58,7 @@ async function step(p) {
 (async () => {
   const relay = spawn(process.execPath, [path.join(__dirname, '../tools/relay.js')], { stdio: 'inherit' });
   await sleep(700);
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME, args: ['--no-sandbox'] } : {});
   try {
     const host = await phone(browser, `${BASE}/?host=127.0.0.1`, 'хост');
     await host.page.click('#btn-net');

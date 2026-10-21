@@ -114,6 +114,7 @@ body {
   background: var(--paper); color: var(--ink); cursor: pointer;
 }
 .seg button[aria-checked="true"] { background: var(--ink); color: #fff; }
+.seg button:disabled { opacity: .3; cursor: default; }
 
 .names { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
 .name-row { display: flex; align-items: center; gap: 10px; }
@@ -124,6 +125,11 @@ body {
 }
 .fig { width: 46px; height: 46px; flex: none; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 50%; }
 .fig svg { width: 46px; height: 46px; display: block; }
+.h2.sub-h { margin-top: 20px; }
+.names.bots:empty { display: none; }
+.bot-row { display: flex; align-items: center; gap: 10px; }
+.bot-row .nm { flex: 1; font-size: 18px; }
+.bot-row em, .seat .nm em.bot { font-style: normal; font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
 
 /* ---------- верх игры ---------- */
 .topbar { display: flex; align-items: center; gap: 8px; }
@@ -508,10 +514,14 @@ body {
     </div>
 
     <div class="panel">
-      <h2 class="h2">Сколько игроков</h2>
+      <h2 class="h2">Сколько людей</h2>
       <div class="seg" id="count-seg" role="radiogroup" aria-label="Число игроков"></div>
       <div id="names" class="names"></div>
       <p class="hint">Нажмите на фишку, чтобы сменить фигурку.</p>
+      <h2 class="h2 sub-h">Боты</h2>
+      <div class="seg" id="bots-seg" role="radiogroup" aria-label="Число ботов"></div>
+      <div id="bot-names" class="names bots"></div>
+      <p class="hint" id="bots-hint">Боты ходят сами: покупают, торгуются, строят и предлагают обмен. Можно играть одному.</p>
     </div>
 
     <div class="panel">
@@ -2334,6 +2344,400 @@ body {
   root.BAAI = root.BAAI || {};
   root.BAAI.engine = Engine;
   if (typeof module !== 'undefined') module.exports = Engine;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* «Баай» — боты. Решают по простым правилам:
+   держат запас денег, покупают клетки для групп, на аукционе не выше цены клетки,
+   строят при полной группе, соглашаются только на выгодный обмен, пользуются ролью.
+   decide(state, игрок) возвращает действие для engine.act — сам ничего не меняет.
+   Работает и в браузере, и в Node (tests/bots.js).
+   © 2026 Евсеев А.В. */
+(function (root) {
+  'use strict';
+
+  const D = (typeof module !== 'undefined') ? require('./data.js') : root.BAAI.data;
+  const E = (typeof module !== 'undefined') ? require('./engine.js') : root.BAAI.engine;
+  const { BOARD, GROUPS, BAYANAI, RULES, ROLES } = D;
+  const OWNABLE = BOARD.map((c, i) => i).filter(i => ['prop', 'transport', 'utility'].includes(BOARD[i].type));
+  const TRANSPORT = [5, 15, 25, 35];
+
+  // Имена ботов — якутские
+  const NAMES = ['Айаал', 'Сардаана', 'Мичил', 'Туйаара', 'Нюргун', 'Кюннэй'];
+
+  let rand = Math.random;
+  const R10 = n => Math.floor(n / 10) * 10;
+  const mine = (s, p) => Object.keys(s.own).map(Number).filter(i => s.own[i].owner === p);
+  const alive = s => s.players.map((_, i) => i).filter(i => !s.players[i].bankrupt);
+  const groupPrice = (s, g) => E.groupCells(g).reduce((n, i) => n + E.price(s, i), 0);
+
+  // Запас денег: чем дороже чужая аренда на поле, тем больше держим
+  function reserve(s, p) {
+    let top = 0;
+    for (const k in s.own) {
+      const o = s.own[k];
+      if (o.owner === p || o.mortgaged) continue;
+      const c = BOARD[k];
+      top = Math.max(top, c.type === 'utility' ? E.rentFor(s, k, { diceSum: 8 }) : E.rentFor(s, k));
+    }
+    return Math.max(100, Math.min(600, Math.round(100 + top * 0.4)));
+  }
+
+  // ---------- оценка имущества ----------
+  // own — карта владения (можно подставить «после обмена»)
+  function fullGroups(own, p) {
+    const out = [];
+    for (const g in GROUPS) if (E.groupCells(+g).every(i => own[i] && own[i].owner === p)) out.push(+g);
+    return out;
+  }
+
+  // Во сколько бот ценит своё имущество: цены клеток, бонус за полные группы и за транспорт
+  function score(s, own, p) {
+    let v = 0, tr = 0, near = 0;
+    for (const k in own) {
+      const o = own[k];
+      if (o.owner !== p) continue;
+      const pr = E.price(s, k);
+      v += o.mortgaged ? pr - E.unmortgageCost(k) : pr;
+      if (BOARD[k].type === 'transport') tr++;
+    }
+    fullGroups(own, p).forEach(g => { v += groupPrice(s, g) * 0.8; });
+    // почти собранная группа (не хватает одной клетки, которая у банка или у нас) — тоже ценность
+    for (const g in GROUPS) {
+      const cells = E.groupCells(+g), have = cells.filter(i => own[i] && own[i].owner === p).length;
+      if (have === cells.length - 1 && have > 0) near += groupPrice(s, +g) * 0.2;
+    }
+    if (tr > 1) v += (tr - 1) * 60;
+    return v + near;
+  }
+
+  // Что будет, если клетка i станет моей: собирает ли группу
+  function completes(s, p, i) {
+    const c = BOARD[i];
+    if (c.type !== 'prop') return false;
+    return E.groupCells(c.group).every(j => j === i || (s.own[j] && s.own[j].owner === p));
+  }
+
+  // Клетка мешает сопернику собрать группу (у него все остальные)
+  function blocks(s, p, i) {
+    const c = BOARD[i];
+    if (c.type !== 'prop') return false;
+    const others = E.groupCells(c.group).filter(j => j !== i);
+    const o0 = s.own[others[0]];
+    return !!o0 && o0.owner !== p && others.every(j => s.own[j] && s.own[j].owner === o0.owner);
+  }
+
+  const isBulchutTr = (s, p, i) => s.players[p].role === 'bulchut' && BOARD[i].type === 'transport';
+
+  // Что можно заложить, не трогая нужную группу. Сначала то, что не входит в полные группы, дешёвое
+  function mortgageList(s, p, keepGroup) {
+    const full = fullGroups(s.own, p);
+    return mine(s, p).filter(i => E.canMortgage(s, p, i) && !(BOARD[i].type === 'prop' && BOARD[i].group === keepGroup))
+      .sort((a, b) => {
+        const fa = BOARD[a].type === 'prop' && full.includes(BOARD[a].group) ? 1 : 0;
+        const fb = BOARD[b].type === 'prop' && full.includes(BOARD[b].group) ? 1 : 0;
+        return fa - fb || BOARD[a].price - BOARD[b].price;
+      });
+  }
+
+  // ---------- карточки на выбор (Булчут) ----------
+  function cardScore(s, p, id) {
+    const c = BAYANAI[id], pl = s.players[p];
+    const others = alive(s).length - 1;
+    if (c.money) return c.money;
+    if (c.free) return 60;
+    if (c.each) return c.each * others;
+    if (c.jail) return unownedCount(s) > 6 ? -150 : 30;
+    if (c.repairs) {
+      let h = 0, ht = 0;
+      mine(s, p).forEach(i => { const n = s.own[i].houses; if (n === 5) ht++; else h += n; });
+      return -(h * c.repairs[0] + ht * c.repairs[1]);
+    }
+    if (c.moveTo !== undefined) return (c.moveTo < pl.pos ? 200 : 0) - landRisk(s, p, c.moveTo);
+    if (c.back) return -landRisk(s, p, (pl.pos + 37) % 40);
+    if (c.nearest) return -40;
+    return 0;
+  }
+
+  // Сколько, скорее всего, придётся заплатить на клетке
+  function landRisk(s, p, i) {
+    const o = s.own[i], c = BOARD[i];
+    if (c.type === 'tax') return E.taxOf(s, i);
+    if (!o || o.owner === p || o.mortgaged) return 0;
+    return c.type === 'utility' ? E.rentFor(s, i, { diceSum: 7 }) : E.rentFor(s, i);
+  }
+
+  const unownedCount = s => OWNABLE.filter(i => !s.own[i]).length;
+
+  // ---------- обмен ----------
+  // Насколько обмен выгоден игроку x: получает cells in и деньги money, отдаёт cells out игроку y
+  function tradeValue(s, x, y, cellsIn, cellsOut, money) {
+    const after = {};
+    for (const k in s.own) after[k] = Object.assign({}, s.own[k]);
+    cellsIn.forEach(i => { after[i].owner = x; });
+    cellsOut.forEach(i => { after[i].owner = y; });
+    let v = score(s, after, x) - score(s, s.own, x) + money;
+    if (s.players[x].role !== 'atyyhyt') v -= cellsIn.reduce((n, i) => n + (s.own[i].mortgaged ? E.mortgageFee(i) : 0), 0);
+    // не дарим сопернику полную группу
+    const had = fullGroups(s.own, y);
+    v -= fullGroups(after, y).filter(g => !had.includes(g)).reduce((n, g) => n + groupPrice(s, g) * 0.8, 0);
+    return v;
+  }
+
+  const GOOD = 25;   // на сколько обмен должен быть выгоднее, чтобы бот согласился
+
+  function judgeTrade(s, p, o) {
+    // p — тот, кому предложили (o.to). Получает o.give, отдаёт o.get
+    if (o.give.cells.some(i => isBulchutTr(s, p, i))) return false;
+    const money = o.give.money - o.get.money + (o.give.cards - o.get.cards) * 50;
+    const moneyAfter = s.players[p].money + o.give.money - o.get.money;
+    return tradeValue(s, p, o.from, o.give.cells, o.get.cells, money) >= GOOD && moneyAfter >= 50;
+  }
+
+  function judgeLoan(s, p, o) {
+    const pl = s.players[p], owe = Math.round(o.amount * (1 + o.rate / 100));
+    if (o.amount > pl.money - reserve(s, p) - 50) return false;
+    if (o.rate < 20 && o.laps > 1) return false;
+    return E.netWorth(s, o.from) >= owe * 1.5;
+  }
+
+  // ---------- бот сам предлагает обмен ----------
+  // Не хватает одной клетки до группы. Людям предлагаем деньги (щедро),
+  // ботам — клетку на клетку с доплатой, если обоим выгодно. Не чаще раза за круг.
+  const askedBy = new WeakMap();   // своя память на каждую партию
+  function proposeTrade(s, p) {
+    const pl = s.players[p], key = `${p}:${s.round}`;
+    if (!askedBy.has(s)) askedBy.set(s, new Set());
+    const asked = askedBy.get(s);
+    if (asked.has(key) || s.phase !== 'end') return null;
+    asked.add(key);
+    const res = reserve(s, p);
+    let best = null, bestV = 0;
+    // людям — только последнюю клетку группы, за деньги
+    for (const g in GROUPS) {
+      const cells = E.groupCells(+g);
+      const missing = cells.filter(i => !(s.own[i] && s.own[i].owner === p));
+      if (missing.length !== 1) continue;
+      const i = missing[0], o = s.own[i];
+      if (!o || s.players[o.owner].bot || s.players[o.owner].bankrupt || !E.canTradeCell(s, o.owner, i)) continue;
+      const offer = R10(E.price(s, i) * (1.6 + rand() * 0.4));
+      if (pl.money - offer < res) continue;
+      const v = tradeValue(s, p, o.owner, [i], [], -offer);
+      if (v > bestV) { bestV = v; best = { to: o.owner, give: { cells: [], money: offer, cards: 0 }, get: { cells: [i], money: 0, cards: 0 } }; }
+    }
+    // ботам — любую клетку из группы, где у нас уже что-то есть: клетка на клетку и/или доплата
+    const myCells = mine(s, p).filter(j => E.canTradeCell(s, p, j));
+    const myGroups = new Set(myCells.filter(j => BOARD[j].type === 'prop').map(j => BOARD[j].group));
+    for (const k in s.own) {
+      const i = +k, o = s.own[i], q = o.owner, c = BOARD[i];
+      if (q === p || !s.players[q].bot || s.players[q].bankrupt || c.type !== 'prop' || !myGroups.has(c.group) || !E.canTradeCell(s, q, i)) continue;
+      for (const j of [null].concat(myCells)) {
+        if (j !== null && (isBulchutTr(s, q, j) || (BOARD[j].type === 'prop' && BOARD[j].group === c.group))) continue;
+        const out = j === null ? [] : [j];
+        const their = tradeValue(s, q, p, out, [i], 0);
+        const m = Math.max(0, Math.ceil((GOOD + 10 - their) / 10) * 10);   // доплата, чтобы боту было выгодно
+        if (pl.money - m < res) continue;
+        // богатый бот готов переплатить за клетку, собирающую группу: лишние деньги без групп ничего не приносят
+        const slack = completes(s, p, i) ? Math.max(0, (pl.money - 3 * res) * 0.25) : 0;
+        const v = tradeValue(s, p, q, [i], out, -m) + slack;
+        if (v >= GOOD && v > bestV) { bestV = v; best = { to: q, give: { cells: out, money: m, cards: 0 }, get: { cells: [i], money: 0, cards: 0 } }; }
+      }
+    }
+    return best ? Object.assign({ type: 'offerTrade' }, best) : null;
+  }
+
+  // ---------- способности ролей ----------
+  function useRole(s, p) {
+    const pl = s.players[p];
+    if (!E.canAbility(s, p)) return null;
+    const res = reserve(s, p);
+    switch (pl.role) {
+      case 'olonkhosut': return s.prize >= 150 ? { type: 'ability' } : null;
+      case 'toyon': return s.round >= 3 && alive(s).length >= 3 ? { type: 'ability' } : null;
+      case 'bulchut': {
+        const strong = mine(s, p).some(i => s.own[i].houses > 0) || fullGroups(s.own, p).length > 0;
+        return strong ? { type: 'ability' } : null;
+      }
+      case 'uus': {
+        const cells = mine(s, p).filter(i => {
+          const o = s.own[i], c = BOARD[i];
+          return c.type === 'prop' && !o.mortgaged && !o.houses && !E.ownsGroup(s, p, c.group)
+            && !E.groupCells(c.group).some(j => s.own[j] && s.own[j].mortgaged);
+        }).sort((a, b) => BOARD[b].price - BOARD[a].price);
+        if (!cells.length) return null;
+        const cost = E.houseCost(s, BOARD[cells[0]].group, p);
+        return pl.money - cost >= res + 100 ? { type: 'ability', cell: cells[0] } : null;
+      }
+      case 'kayur': {
+        if (s.phase !== 'roll') return null;
+        const free = TRANSPORT.filter(i => i !== pl.pos && !s.own[i] && pl.money - E.price(s, i) >= res);
+        return free.length ? { type: 'ability', cell: free[Math.floor(rand() * free.length)] } : null;
+      }
+    }
+    return null;
+  }
+
+  // ---------- спокойная часть хода: строим, выкупаем, возвращаем долг ----------
+  function manage(s, p) {
+    const pl = s.players[p], res = reserve(s, p);
+    const role = useRole(s, p);
+    if (role) return role;
+    if (pl.loan && pl.money - pl.loan.owe >= res + 100) return { type: 'repayLoan' };
+    // выкуп: сначала клетки полных групп
+    const full = fullGroups(s.own, p);
+    const un = mine(s, p).filter(i => s.own[i].mortgaged && E.canUnmortgage(s, p, i) && pl.money - E.unmortgageCost(i) >= res + 50)
+      .sort((a, b) => (full.includes(BOARD[b].group) ? 1 : 0) - (full.includes(BOARD[a].group) ? 1 : 0));
+    if (un.length) return { type: 'unmortgage', cell: un[0] };
+    // стройка: где прибавка аренды на рубль больше
+    let best = null, bestGain = 0;
+    mine(s, p).forEach(i => {
+      if (!E.canBuild(s, p, i)) return;
+      const c = BOARD[i], cost = E.houseCost(s, c.group, p);
+      if (pl.money - cost < res) return;
+      const h = s.own[i].houses;
+      const gain = (E.baseRent(s, i, h + 1, true) - E.baseRent(s, i, h, true)) / cost;
+      if (gain > bestGain) { bestGain = gain; best = i; }
+    });
+    if (best !== null) return { type: 'build', cell: best };
+    return null;
+  }
+
+  // ---------- главное: что делать сейчас ----------
+  function decide(s, p) {
+    const pl = s.players[p];
+    if (pl.bankrupt) return { type: 'endTurn' };
+    const res = reserve(s, p);
+    switch (s.phase) {
+      case 'roles': return { type: 'pickRole', role: ROLES[Math.floor(rand() * ROLES.length)].id };
+
+      case 'omen': {
+        const d = s.dice, to = (pl.pos + d[0] + d[1]) % 40;
+        const risk = landRisk(s, p, to);
+        return { type: risk > 100 || risk > pl.money * 0.3 ? 'reroll' : 'go' };
+      }
+
+      case 'pick2': {
+        const ids = s.choice.ids;
+        return { type: 'pickCard', k: cardScore(s, p, ids[1]) > cardScore(s, p, ids[0]) ? 1 : 0 };
+      }
+
+      case 'auction': {
+        const A = s.auction, i = A.cell, worth = E.price(s, i);
+        const want = completes(s, p, i) || blocks(s, p, i);
+        const spare = pl.money - res * (want ? 0.3 : 0.8);
+        const cap = R10(Math.min(worth, spare));
+        if (pl.role === 'atyyhyt' && E.canAbility(s, p) && A.start <= spare && (want || worth >= 200)) return { type: 'ability' };
+        if (A.sealed) {
+          if (cap < A.start) return { type: 'pass' };
+          const bid = Math.max(A.start, R10(cap * (want ? 0.95 : 0.7 + rand() * 0.2)));
+          return { type: 'bid', amount: Math.min(bid, pl.money) };
+        }
+        const need = E.minBid(s);
+        if (A.leader === p) return { type: 'pass' };   // не бывает, но на всякий случай
+        return need <= cap && need <= pl.money ? { type: 'bid', amount: need } : { type: 'pass' };
+      }
+
+      case 'offer': {
+        const o = s.offer;
+        const yes = o.kind === 'trade' ? judgeTrade(s, p, o) : judgeLoan(s, p, o);
+        return { type: yes ? 'accept' : 'reject' };
+      }
+
+      case 'buy': {
+        const i = s.pending.cell, cost = E.price(s, i);
+        if (isBulchutTr(s, p, i)) return { type: 'decline' };
+        const want = completes(s, p, i) || blocks(s, p, i);
+        if (pl.money - cost >= res) return { type: 'buy' };
+        if (want) {
+          if (pl.money >= cost + 20) return { type: 'buy' };
+          // не хватает на клетку, собирающую группу — закладываем лишнее
+          const m = mortgageList(s, p, BOARD[i].group);
+          const can = m.reduce((n, j) => n + E.mortgageValue(j), 0);
+          if (pl.money + can >= cost + 20 && m.length) return { type: 'mortgage', cell: m[0] };
+        }
+        return { type: 'decline' };
+      }
+
+      case 'debt': {
+        const need = s.pending.amount;
+        if (pl.money >= need) return { type: 'payDebt' };
+        // продаём дома с самых дешёвых групп
+        const sell = mine(s, p).filter(i => E.canSell(s, p, i)).sort((a, b) => GROUPS[BOARD[a].group].house - GROUPS[BOARD[b].group].house);
+        if (sell.length) return { type: 'sell', cell: sell[0] };
+        const m = mortgageList(s, p, null);
+        if (m.length) return { type: 'mortgage', cell: m[0] };
+        if (!pl.loan && pl.role !== 'olonkhosut') {
+          const amt = Math.ceil((need - pl.money) / 100) * 100;
+          if (amt <= RULES.bankLoan.max) return { type: 'takeLoan', from: E.BANK, amount: Math.max(100, amt) };
+        }
+        return { type: 'bankrupt' };
+      }
+
+      case 'roll': {
+        if (pl.inJail) {
+          const early = unownedCount(s) > 6;
+          if (early || pl.role === 'kayur') {
+            if (pl.freeCards.length) return { type: 'useCard' };
+            if (pl.money - RULES.jailFine >= res) return { type: 'payJail' };
+          }
+          return { type: 'roll' };
+        }
+        return manage(s, p) || { type: 'roll' };
+      }
+
+      case 'end':
+        return manage(s, p) || proposeTrade(s, p) || { type: 'endTurn' };
+    }
+    return null;
+  }
+
+  // Если движок отказал — безопасный ход, чтобы партия не встала
+  function fallback(s) {
+    switch (s.phase) {
+      case 'auction': return { type: 'pass' };
+      case 'offer': return { type: 'reject' };
+      case 'buy': return { type: 'decline' };
+      case 'roll': return { type: 'roll' };
+      case 'end': return { type: 'endTurn' };
+      case 'omen': return { type: 'go' };
+      case 'pick2': return { type: 'pickCard', k: 0 };
+      case 'roles': return { type: 'pickRole', role: ROLES[0].id };
+      case 'debt': return { type: 'bankrupt' };
+    }
+    return null;
+  }
+
+  // Сделать ход бота: решить, применить, при отказе — запасной ход. Возвращает действие или null
+  function step(s, applyFn) {
+    const p = E.actor(s);
+    if (!s.players[p] || !s.players[p].bot || s.phase === 'over') return null;
+    const a = decide(s, p);
+    if (a) {
+      a.player = p;
+      const r = applyFn(a);
+      if (r && r.ok) return a;
+    }
+    const f = fallback(s);
+    if (!f) return null;
+    f.player = p;
+    applyFn(f);
+    return f;
+  }
+
+  // Пауза перед ходом бота: дать посмотреть, что происходит
+  function delay(s, lastAction) {
+    if (lastAction && (lastAction.type === 'roll' || lastAction.type === 'reroll' || lastAction.type === 'go') && s.dice) {
+      return 1500 + (s.dice[0] + s.dice[1]) * 190;
+    }
+    if (s.phase === 'auction' || s.phase === 'offer') return 1100;
+    return 850;
+  }
+
+  const Bot = { decide, fallback, step, delay, reserve, judgeTrade, NAMES, setRandom(fn) { rand = fn; } };
+  root.BAAI = root.BAAI || {};
+  root.BAAI.bot = Bot;
+  if (typeof module !== 'undefined') module.exports = Bot;
 })(typeof window !== 'undefined' ? window : globalThis);
 
 </script>
@@ -5288,7 +5692,8 @@ var qrcode = function() {
   }
   const seatConn = i => { for (const id in H.ids) if (H.ids[id] === H.seats[i].key) return Number(id); return null; };
   const seatOf = id => H.seats.findIndex(s => s.key === H.ids[id]);
-  const onlineList = () => H.seats.map((s, i) => s.key === 'host' || seatConn(i) !== null);
+  // бот всегда «на связи»: его ходы делает телефон хоста
+  const onlineList = () => H.seats.map((s, i) => s.key === 'host' || !!s.bot || seatConn(i) !== null);
 
   function hostLink() {
     if (H.conn) return;
@@ -5327,7 +5732,7 @@ var qrcode = function() {
     }
     if (m.t === 'claim') {
       const want = Number(m.seat), key = String(H.ids[id] || '').replace(/\?$/, '');
-      if (!key || !H.seats[want] || H.seats[want].key === 'host' || seatConn(want) !== null) {
+      if (!key || !H.seats[want] || H.seats[want].key === 'host' || H.seats[want].bot || seatConn(want) !== null) {
         return hostSend([id], { t: 'full', started: net.inGame, seats: offlineSeats() });
       }
       H.seats[want].key = key;
@@ -5350,7 +5755,7 @@ var qrcode = function() {
 
   function offlineSeats() {
     return H.seats.map((s, i) => ({ i, name: s.name, figure: s.figure, color: T.PLAYER[i] }))
-      .filter(s => H.seats[s.i].key !== 'host' && seatConn(s.i) === null);
+      .filter(s => H.seats[s.i].key !== 'host' && !H.seats[s.i].bot && seatConn(s.i) === null);
   }
 
   function seatsChanged() {
@@ -5360,7 +5765,7 @@ var qrcode = function() {
   }
 
   function lobbyBroadcast() {
-    const seats = H.seats.map((s, i) => ({ name: s.name, figure: s.figure, color: T.PLAYER[i], online: s.key === 'host' || seatConn(i) !== null }));
+    const seats = H.seats.map((s, i) => ({ name: s.name, figure: s.figure, color: T.PLAYER[i], bot: !!s.bot, online: s.key === 'host' || !!s.bot || seatConn(i) !== null }));
     H.seats.forEach((s, i) => {
       const id = seatConn(i);
       if (id !== null) hostSend([id], { t: 'lobby', seats, you: i, minutes: H.minutes, rules: H.rules });
@@ -5421,7 +5826,7 @@ var qrcode = function() {
 
   function saveNet() {
     const G = net.ui && net.ui.getState();
-    store.set(NET_SAVE, G ? { G, seats: H.seats.map(s => ({ key: s.key, name: s.name, figure: s.figure })), minutes: H.minutes, rules: H.rules } : null);
+    store.set(NET_SAVE, G ? { G, seats: H.seats.map(s => ({ key: s.key, name: s.name, figure: s.figure, bot: !!s.bot })), minutes: H.minutes, rules: H.rules } : null);
   }
 
   function openLobby() {
@@ -5440,7 +5845,7 @@ var qrcode = function() {
     if (H.seats.length < 2) return;
     const h = H.seats[0];
     store.set(ME_KEY, { name: h.name, figure: h.figure });
-    const players = H.seats.map((s, i) => ({ name: s.name, color: T.PLAYER[i], figure: s.figure }));
+    const players = H.seats.map((s, i) => ({ name: s.name, color: T.PLAYER[i], figure: s.figure, bot: !!s.bot }));
     net.inGame = true; net.me = 0; net.online = onlineList();
     net.ui.startNetGame(players, H.minutes, H.rules);
     saveNet();
@@ -5549,7 +5954,7 @@ var qrcode = function() {
 
   function seatRows(seats, you, removable) {
     return seats.map((s, i) => `<div class="seat${i === you ? ' you' : ''}">${tok(s.figure, s.color, 38)}
-      <span class="nm">${esc(s.name)}${i === you ? ' <em>вы</em>' : ''}${i === 0 ? ' <em>хост</em>' : ''}</span>
+      <span class="nm">${esc(s.name)}${i === you ? ' <em>вы</em>' : ''}${i === 0 ? ' <em>хост</em>' : ''}${s.bot ? ' <em class="bot">бот</em>' : ''}</span>
       <span class="dot${s.online ? ' on' : ''}" title="${s.online ? 'на связи' : 'нет связи'}"></span>
       ${removable && i > 0 ? `<button type="button" class="btn sm ghost" data-net="kick" data-i="${i}" aria-label="Убрать ${esc(s.name)}">✕</button>` : ''}</div>`).join('');
   }
@@ -5566,7 +5971,7 @@ var qrcode = function() {
     if (!el || el.hidden) return;
     let h = `<header class="setup-head"><h1 class="logo">Баай</h1><p class="tagline">Игра по Wi-Fi</p></header>`;
     if (mode === 'host') {
-      const seats = H.seats.map((s, i) => ({ name: s.name, figure: s.figure, color: T.PLAYER[i], online: s.key === 'host' || seatConn(i) !== null }));
+      const seats = H.seats.map((s, i) => ({ name: s.name, figure: s.figure, color: T.PLAYER[i], bot: !!s.bot, online: s.key === 'host' || !!s.bot || seatConn(i) !== null }));
       const me = H.seats[0];
       h += '<div class="panel qr-panel">';
       if (!H.linked) h += '<p class="notice bad">Сервер игры не отвечает. Перезапустите приложение.</p>';
@@ -5584,7 +5989,9 @@ var qrcode = function() {
         <input id="net-name" type="text" maxlength="14" value="${esc(me.name)}" aria-label="Ваше имя">
         ${figurePicker(me.figure, H.seats.slice(1).map(s => s.figure), T.PLAYER[0])}</div>`;
       h += `<div class="panel"><h2 class="h2">Игроки · ${seats.length} из 6</h2>${seatRows(seats, 0, true)}
-        ${seats.length < 2 ? '<p class="hint">Ждём, когда подключится хотя бы один игрок.</p>' : ''}</div>`;
+        ${seats.length < 2 ? '<p class="hint">Ждём, когда подключится хотя бы один игрок, или добавьте бота.</p>' : ''}
+        ${seats.length < 6 ? '<button type="button" class="btn" data-net="addBot">Добавить бота</button>' : ''}
+        ${seats.some(s => s.bot) ? '<p class="hint">Боты ходят сами, их ходы делает этот телефон. Если подключится ещё человек, а мест нет, уберите бота.</p>' : ''}</div>`;
       h += `<div class="panel"><h2 class="h2">Ограничение по времени</h2><div class="seg">${[[0, 'Нет'], [30, '30 мин'], [60, '60 мин'], [90, '90 мин']].map(([m, t]) =>
         `<button type="button" role="radio" aria-checked="${m === H.minutes}" data-net="min" data-m="${m}">${t}</button>`).join('')}</div></div>`;
       h += `<div class="panel"><h2 class="h2">Правила партии</h2><div class="rules">${net.ui.rulesHTML(H.rules, 'data-nrule')}</div></div>`;
@@ -5630,6 +6037,12 @@ var qrcode = function() {
       if (what === 'min') { H.minutes = Number(t.dataset.m); return seatsChanged(); }
       if (what === 'ip') { H.ip = t.dataset.ip; return renderLobby(); }
       if (what === 'refresh') { H.ips = hostIps(); if (!H.ips.includes(H.ip)) H.ip = H.ips[0] || ''; return renderLobby(); }
+      if (what === 'addBot' && H.seats.length < 6) {
+        const used = H.seats.map(x => x.name.toLowerCase());
+        const name = BAAI.bot.NAMES.find(n => !used.includes(n.toLowerCase())) || `Бот ${H.seats.length + 1}`;
+        H.seats.push({ key: 'bot:' + Math.random().toString(36).slice(2, 8), name, figure: freeFigure(H.seats, '', -1), bot: true });
+        return seatsChanged();
+      }
       if (what === 'start') return startNet();
       if (what === 'back') { leaveHost(); $('lobby').hidden = true; net.ui.showSetup(); return; }
     } else {
@@ -5701,10 +6114,22 @@ var qrcode = function() {
 
   const NET = BAAI.net || { inGame: false, isClient: () => false, isHost: () => false, canHost: false, hasSave: () => false };
   const netGame = () => NET.inGame;
-  // Чей это телефон: в сетевой игре — свой игрок, на одном телефоне — тот, чей ход
-  const me = () => netGame() ? NET.me : G.turn;
-  // Действует ли сейчас владелец этого телефона
-  const myMove = () => !netGame() || E.actor(G) === NET.me;
+  const BOT = BAAI.bot;
+  const isBot = i => !!(G && G.players[i] && G.players[i].bot);
+  const humans = () => G.players.filter(p => !p.bot).length;
+  // У кого сейчас телефон (одна игра на телефоне): человек, которому его передали последним
+  let holder = null;
+  function viewer() {
+    if (holder !== null && G.players[holder] && !isBot(holder)) return holder;
+    const a = E.actor(G);
+    if (!isBot(a)) return a;
+    const h = G.players.findIndex(p => !p.bot);
+    return h < 0 ? a : h;
+  }
+  // Чей это телефон: в сетевой игре — свой игрок, на одном телефоне — тот, у кого он в руках
+  const me = () => netGame() ? NET.me : viewer();
+  // Действует ли сейчас владелец этого телефона (за ботов ходит сам телефон)
+  const myMove = () => netGame() ? E.actor(G) === NET.me : !isBot(E.actor(G));
   const SAVE_KEY = 'baai.save.v2';
   const SETUP_KEY = 'baai.setup.v2';
   const DECK_ABOUT = {
@@ -5715,7 +6140,8 @@ var qrcode = function() {
   let G = null;
   let shownCard = 0;
   let board = null;
-  let setup = { count: 3, minutes: 0, names: [], figures: ['horse', 'deer', 'choron', 'khomus', 'bear', 'crane'], rules: null };
+  let setup = { count: 3, bots: 0, minutes: 0, names: [], figures: ['horse', 'deer', 'choron', 'khomus', 'bear', 'crane'], rules: null };
+  let botT = 0;        // таймер хода бота
   let trade = null;   // черновик обмена
   let loan = null;    // черновик кредита
   let lastSnap = null; // что было на экране в прошлый раз — по разнице играем звуки и анимации
@@ -5761,7 +6187,7 @@ var qrcode = function() {
   // Видно ли сейчас деньги игрока i
   function seesMoney(i) {
     if (!G || G.rules.money !== 'hidden' || G.phase === 'over') return true;
-    return i === (netGame() ? NET.me : E.actor(G));
+    return i === me();
   }
   const moneyOf = (i, v) => seesMoney(i) ? rub(v === undefined ? G.players[i].money : v) : '••• ₽';
 
@@ -5769,7 +6195,7 @@ var qrcode = function() {
   const ROLE_BTN = { uus: 'Дом без группы', bulchut: 'Засада', atyyhyt: 'Забрать по стартовой цене', kayur: 'Упряжка на транспорт', toyon: 'Созвать сход', olonkhosut: 'Забрать приз сказанием' };
   const roleOf = i => (G.players[i] && E.ROLE[G.players[i].role]) || null;
   // Чья роль видна этому телефону: своя всегда, чужая — когда раскрыта
-  const seesRole = i => G.players[i].roleShown || G.phase === 'over' || (netGame() ? i === NET.me : i === E.actor(G));
+  const seesRole = i => G.players[i].roleShown || G.phase === 'over' || i === me();
 
   function roleCardHTML(r, used, act) {
     return `<div class="role-card">
@@ -5811,8 +6237,15 @@ var qrcode = function() {
   function renderSetup() {
     $('rules-box').innerHTML = rulesHTML(setup.rules, 'data-rule');
     $('setup-medals').innerHTML = T.FIGURES.map((f, i) => T.tokenSVG(f.id, T.PLAYER[i], 34)).join('');
-    $('count-seg').innerHTML = [2, 3, 4, 5, 6].map(n =>
+    $('count-seg').innerHTML = [1, 2, 3, 4, 5, 6].map(n =>
       `<button type="button" role="radio" aria-checked="${n === setup.count}" data-n="${n}">${n}</button>`).join('');
+    $('bots-seg').innerHTML = [0, 1, 2, 3, 4, 5].map(n =>
+      `<button type="button" role="radio" aria-checked="${n === setup.bots}" data-b="${n}" ${n + setup.count > 6 || n + setup.count < 2 ? 'disabled' : ''}>${n}</button>`).join('');
+    $('bot-names').innerHTML = botNames().map((nm, k) => {
+      const i = setup.count + k, fig = T.FIGURES.find(f => f.id === setup.figures[i]);
+      return `<div class="bot-row"><button type="button" class="fig" data-fig="${i}" aria-label="Фишка бота ${esc(nm)}: ${fig.name}. Сменить">${T.tokenSVG(setup.figures[i], T.PLAYER[i], 46)}</button>
+        <span class="nm">${esc(nm)}</span><em>бот</em></div>`;
+    }).join('');
     $('time-seg').innerHTML = [[0, 'Нет'], [30, '30 мин'], [60, '60 мин'], [90, '90 мин']].map(([m, t]) =>
       `<button type="button" role="radio" aria-checked="${m === setup.minutes}" data-m="${m}">${t}</button>`).join('');
     let html = '';
@@ -5830,6 +6263,19 @@ var qrcode = function() {
     $('btn-net-resume').hidden = !NET.hasSave();
   }
 
+  // Имена ботов: якутские, не совпадают с именами людей
+  function botNames() {
+    const taken = setup.names.slice(0, setup.count).map(n => (n || '').toLowerCase());
+    return BOT.NAMES.filter(n => !taken.includes(n.toLowerCase())).slice(0, setup.bots);
+  }
+
+  // Людей 1–6, ботов 0–5, всего от 2 до 6
+  function fixCounts(changed) {
+    if (changed === 'count' && setup.count + setup.bots > 6) setup.bots = 6 - setup.count;
+    if (changed === 'bots' && setup.count + setup.bots > 6) setup.count = 6 - setup.bots;
+    if (setup.count + setup.bots < 2) setup.bots = 2 - setup.count;
+  }
+
   function readNames() {
     for (let i = 0; i < setup.count; i++) {
       const el = $('name-' + i);
@@ -5840,7 +6286,7 @@ var qrcode = function() {
   // Следующая фигурка, которую не взял никто из играющих
   function nextFigure(i) {
     const ids = T.FIGURES.map(f => f.id);
-    const taken = setup.figures.slice(0, setup.count).filter((_, k) => k !== i);
+    const taken = setup.figures.slice(0, setup.count + setup.bots).filter((_, k) => k !== i);
     let k = ids.indexOf(setup.figures[i]);
     for (let n = 0; n < ids.length; n++) {
       k = (k + 1) % ids.length;
@@ -5857,12 +6303,14 @@ var qrcode = function() {
     store.set(SETUP_KEY, setup);
     const players = [];
     for (let i = 0; i < setup.count; i++) players.push({ name: setup.names[i] || `Игрок ${i + 1}`, color: T.PLAYER[i], figure: setup.figures[i] });
+    botNames().forEach((name, k) => { const i = setup.count + k; players.push({ name, color: T.PLAYER[i], figure: setup.figures[i], bot: true }); });
     G = E.create(players, { minutes: setup.minutes, rules: setup.rules });
     G.log.push(`— Ход: ${G.players[0].name}`);
     shownCard = 0;
+    holder = G.phase === 'roles' && humans() > 1 ? null : 0;
     save();
     showGame(true);
-    if (G.phase === 'roles') showHandoff();
+    maybeHandoff();
   }
 
   function showGame(fresh) {
@@ -5874,6 +6322,7 @@ var qrcode = function() {
     else if (fresh) board.reset();
     lastSnap = null; heldMoney = null;
     render({ turnChanged: true });
+    botTick();
   }
 
   function showSetup() {
@@ -5909,7 +6358,7 @@ var qrcode = function() {
     else if (G.phase === 'roll') msg = 'Бросай кубики';
     else msg = BOARD[pl.pos].name;
     const dice = G.dice && G.phase !== 'auction' && G.phase !== 'offer' ? `<div class="dice" id="dice">${dieHTML(G.dice[0])}${dieHTML(G.dice[1])}</div>` : '';
-    const you = netGame() && who === NET.me ? ' <em class="you">ваш ход</em>' : '';
+    const you = netGame() && who === NET.me ? ' <em class="you">ваш ход</em>' : pl.bot ? ' <em class="you bot">бот</em>' : '';
     return `${token(pl, 40)}<div class="col"><div class="who">${esc(pl.name)}${you}</div><div class="msg">${esc(msg)}</div></div>${dice}`;
   }
 
@@ -6010,8 +6459,8 @@ var qrcode = function() {
       return `<div class="notice">${esc(pl.name)} ${o.kind === 'trade' ? `решает, меняться ли с игроком ${esc(G.players[o.from].name)}` : `решает, дать ли в долг игроку ${esc(G.players[o.from].name)}`}.${leftHTML()}</div>`;
     }
     const off = NET.online && !NET.online[who] ? ' Игрок сейчас без связи — ждём, пока переподключится.' : '';
-    const out = G.players[NET.me] && G.players[NET.me].bankrupt ? '<p class="sub">Вы выбыли из игры, но можете смотреть до конца.</p>' : '';
-    return `<div class="notice wait">Ходит <b>${esc(pl.name)}</b>.${off}</div>${out}`;
+    const out = netGame() && G.players[NET.me] && G.players[NET.me].bankrupt ? '<p class="sub">Вы выбыли из игры, но можете смотреть до конца.</p>' : '';
+    return `<div class="notice wait">Ходит <b>${esc(pl.name)}</b>${pl.bot ? ' (бот)' : ''}.${off}</div>${out}`;
   }
 
   function renderActions() {
@@ -6090,6 +6539,7 @@ var qrcode = function() {
       if (p.loan) tags.push(`долг ${rub(p.loan.owe)}`);
       if (p.freeCards.length) tags.push(`вездеход ×${p.freeCards.length}`);
       if (netGame() && i === NET.me) tags.unshift('вы');
+      if (p.bot) tags.unshift('бот');
       if (roleOf(i) && G.players[i].roleShown) tags.push(roleOf(i).name);
       if (netGame() && NET.online && !NET.online[i] && !p.bankrupt) tags.push('нет связи');
       const money = heldMoney && heldMoney[i] !== undefined ? heldMoney[i] : p.money;
@@ -6257,12 +6707,12 @@ var qrcode = function() {
     if (ev.jailIn.length) { FX.play('wind'); FX.vibe([30, 40, 30]); }
     if (ev.auctionStart) FX.play('gavel');
     else if (ev.bid) FX.play('bid');
-    const mineNow = netGame() ? E.actor(G) === NET.me : true;
+    const mineNow = netGame() ? E.actor(G) === NET.me : !isBot(E.actor(G));
     if (G.phase === 'over') return;
     if (ev.offer && mineNow) { FX.play('offer'); FX.vibe([60, 50, 60]); }
     else if (ev.actorChanged && G.phase === 'roll' && !ev.jailIn.length) {
       if (netGame() && E.actor(G) === NET.me) { FX.play('turn'); FX.vibe(120); }
-      else if (!netGame()) FX.play('turn');
+      else if (!netGame() && !isBot(E.actor(G))) FX.play('turn');
     }
   }
 
@@ -6332,6 +6782,13 @@ var qrcode = function() {
     openKind('card', `<div class="card-wrap"><div class="card-face ${card.deck}">${ic}
         <div class="deck">${esc(card.title)}</div><p>${esc(card.text)}</p></div></div>
       ${btn('Понятно', 'close', 'primary big')}`);
+    // карточку бота убираем сами — человеку не надо её закрывать
+    if (isBot(card.player)) {
+      const sheet = $('sheet');
+      sheet.querySelector('.deck').textContent = `${card.title} · ${G.players[card.player].name}`;
+      setTimeout(() => { if (sheetIs('card') && sheet.dataset.seq === String(card.seq)) closeSheet(); }, botFast ? 1600 : 2800);
+    }
+    $('sheet').dataset.seq = card.seq;
   }
 
   function showCell(i) {
@@ -6508,6 +6965,7 @@ var qrcode = function() {
       ${btn('Правила кратко', 'rules')}
       <div class="toggles">${btn(`${icon(FX.sound ? 'sound' : 'mute', 'currentColor', 2.2)}${FX.sound ? 'Звук включён' : 'Звук выключен'}`, 'fxSound', 'sm ic', false, `aria-pressed="${FX.sound}"`)}
       ${FX.canVibe ? btn(`${icon('vibe', 'currentColor', 2.2)}${FX.vibe ? 'Вибрация включена' : 'Вибрация выключена'}`, 'fxVibe', 'sm ic', false, `aria-pressed="${FX.vibe}"`) : ''}</div>
+      ${G && G.players.some(p => p.bot) && !NET.isClient() ? btn(`${icon('sled', 'currentColor', 2.2)}${botFast ? 'Боты ходят быстро' : 'Боты ходят обычно'}`, 'botSpeed', 'sm ic', false, `aria-pressed="${botFast}"`) : ''}
       ${NET.isHost() ? btn('QR для подключения', 'showQr') : ''}
       ${NET.isClient() ? '' : btn('Новая партия', 'askNew')}
       ${btn('Закрыть', 'close', 'ghost')}`);
@@ -6536,6 +6994,7 @@ var qrcode = function() {
   // Передать телефон тому, кто сейчас действует
   function showHandoff() {
     const who = E.actor(G), pl = G.players[who];
+    holder = who;
     let sub = 'Передайте телефон', what = G.rules.money === 'hidden' ? 'Ваш ход' : rub(pl.money), go = 'Мой ход';
     if (G.phase === 'roles') {
       sub = 'Тайная роль · остальные не смотрят';
@@ -6562,6 +7021,34 @@ var qrcode = function() {
       ${btn(go, 'close', 'primary big')}`);
   }
 
+  // Передать телефон, если теперь действует другой человек (боты ходят сами)
+  function maybeHandoff() {
+    if (netGame() || !G || G.phase === 'over') return;
+    const a = E.actor(G);
+    if (isBot(a)) return;
+    if (humans() <= 1) { holder = a; return; }
+    if (a !== holder) showHandoff();
+  }
+
+  // ---------- боты ----------
+  let botFast = store.get('baai.botfast') === true;
+  // Если сейчас ходит бот — через паузу делаем его ход. Ходы ботов делает этот телефон (или хост)
+  function botTick(last) {
+    clearTimeout(botT);
+    if (!G || G.phase === 'over' || NET.isClient() || $('game').hidden || !isBot(E.actor(G))) return;
+    const wait = BOT.delay(G, last) * (botFast ? 0.45 : 1);
+    botT = setTimeout(() => {
+      if (!G || G.phase === 'over' || !isBot(E.actor(G))) return;
+      const o = G.phase === 'offer' ? G.offer : null;
+      const a = BOT.step(G, x => applyAction(x, { remote: true, bot: true }));
+      if (o && a && (a.type === 'accept' || a.type === 'reject') && (!netGame() || o.from === NET.me) && !isBot(o.from)) {
+        const nm = G.players[a.player].name;
+        toast(a.type === 'accept' ? `${nm}: ${o.kind === 'trade' ? 'обмен принят' : 'даёт в долг'}` : `${nm}: ${o.kind === 'trade' ? 'от обмена отказывается' : 'в долг не даёт'}`);
+      }
+      botTick(a);
+    }, wait);
+  }
+
   let toastT = 0;
   function toast(t) {
     const el = $('toast');
@@ -6574,6 +7061,7 @@ var qrcode = function() {
   function send(type, extra) {
     const a = Object.assign({ type, player: netGame() ? NET.me : E.actor(G) }, extra || {});
     if (NET.isClient()) return NET.send(a);
+    if (!netGame()) holder = a.player;
     const r = applyAction(a, {});
     if (!r.ok) toast(r.error);
     return r.ok;
@@ -6589,6 +7077,7 @@ var qrcode = function() {
     const opts = { rolled: a.type === 'roll' || a.type === 'reroll', turnChanged: G.turn !== before };
     if (netGame()) NET.publish(opts);
     afterChange(opts, a, actorBefore, !!(how && how.remote));
+    if (!(how && how.bot)) botTick(a);
     return r;
   }
 
@@ -6600,6 +7089,7 @@ var qrcode = function() {
       if (sheetOpen && (kind === 'trade' || kind === 'loan' || kind === 'menu') && !myMove()) closeSheet();
       render(opts);
       if (sheetOpen && kind.startsWith('cell:') && !$('sheet').hidden && $('sheet').dataset.kind === kind) showCell(Number(kind.slice(5)));
+      maybeHandoff();
       return;
     }
     if (sheetOpen && kind.startsWith('cell:') && ['build', 'sell', 'mortgage', 'unmortgage'].includes(a.type) && E.actor(G) === actorBefore) {
@@ -6607,7 +7097,7 @@ var qrcode = function() {
     }
     closeSheet();
     render(opts);
-    if (!netGame() && G.phase !== 'over' && E.actor(G) !== actorBefore) showHandoff();
+    maybeHandoff();
   }
 
   // Игрок: пришло новое состояние от хоста
@@ -6647,11 +7137,13 @@ var qrcode = function() {
       case 'fxSound': FX.toggle('sound'); showMenu(); return;
       case 'fxVibe': FX.toggle('vibe'); showMenu(); return;
       case 'showQr': showQr(); return;
+      case 'botSpeed': botFast = !botFast; store.set('baai.botfast', botFast); showMenu(); return;
       case 'askNew':
         openKind('ask', `<h3>Начать новую партию?</h3><p>Текущая партия будет удалена.</p>
           ${btn('Да, новая партия', 'newGame', 'danger')}${btn('Отмена', 'close', 'ghost')}`);
         return;
       case 'newGame':
+        clearTimeout(botT);
         if (netGame()) { G = null; closeSheet(); NET.backToLobby(); return; }
         G = null; store.set(SAVE_KEY, null); showSetup(); return;
 
@@ -6721,6 +7213,8 @@ var qrcode = function() {
     splash();
     const saved = store.get(SETUP_KEY);
     if (saved && saved.figures && saved.figures.length === 6) setup = Object.assign(setup, saved);
+    setup.bots = Math.max(0, Math.min(5, Number(setup.bots) || 0));
+    fixCounts('count');
     document.addEventListener('click', onClick);
     document.addEventListener('keydown', e => {
       if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"]')) { e.preventDefault(); e.target.click(); }
@@ -6731,10 +7225,14 @@ var qrcode = function() {
     $('btn-all').addEventListener('click', () => board && board.showAll());
     $('prize').addEventListener('click', () => showCell(20));
     $('btn-start').addEventListener('click', startGame);
-    $('btn-resume').addEventListener('click', () => { G = E.migrate(store.get(SAVE_KEY)); if (G) { shownCard = G.card ? G.card.seq : 0; showGame(true); } });
+    $('btn-resume').addEventListener('click', () => { G = E.migrate(store.get(SAVE_KEY)); holder = null; if (G) { shownCard = G.card ? G.card.seq : 0; showGame(true); } });
     $('count-seg').addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;
-      readNames(); setup.count = Number(b.dataset.n); renderSetup();
+      readNames(); setup.count = Number(b.dataset.n); fixCounts('count'); renderSetup();
+    });
+    $('bots-seg').addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b || b.disabled) return;
+      readNames(); setup.bots = Number(b.dataset.b); fixCounts('bots'); renderSetup();
     });
     $('time-seg').addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;
@@ -6768,7 +7266,7 @@ var qrcode = function() {
         showGame(true);
         NET.publish({ turnChanged: true });
       },
-      leaveGame() { G = null; closeSheet(); $('game').hidden = true; },
+      leaveGame() { clearTimeout(botT); G = null; closeSheet(); $('game').hidden = true; },
     };
     if (NET.boot) NET.boot();
     if (NET.isClient()) return;

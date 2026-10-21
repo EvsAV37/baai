@@ -31,10 +31,14 @@
     </div>
 
     <div class="panel">
-      <h2 class="h2">Сколько игроков</h2>
+      <h2 class="h2">Сколько людей</h2>
       <div class="seg" id="count-seg" role="radiogroup" aria-label="Число игроков"></div>
       <div id="names" class="names"></div>
       <p class="hint">Нажмите на фишку, чтобы сменить фигурку.</p>
+      <h2 class="h2 sub-h">Боты</h2>
+      <div class="seg" id="bots-seg" role="radiogroup" aria-label="Число ботов"></div>
+      <div id="bot-names" class="names bots"></div>
+      <p class="hint" id="bots-hint">Боты ходят сами: покупают, торгуются, строят и предлагают обмен. Можно играть одному.</p>
     </div>
 
     <div class="panel">
@@ -108,6 +112,7 @@
 <script src="js/theme.js"></script>
 <script src="js/fx.js"></script>
 <script src="js/engine.js"></script>
+<script src="js/bot.js"></script>
 <script src="js/board.js"></script>
 <script src="vendor/qrcode.js"></script>
 <script src="js/net.js"></script>

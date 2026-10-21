@@ -95,7 +95,8 @@
   }
   const seatConn = i => { for (const id in H.ids) if (H.ids[id] === H.seats[i].key) return Number(id); return null; };
   const seatOf = id => H.seats.findIndex(s => s.key === H.ids[id]);
-  const onlineList = () => H.seats.map((s, i) => s.key === 'host' || seatConn(i) !== null);
+  // бот всегда «на связи»: его ходы делает телефон хоста
+  const onlineList = () => H.seats.map((s, i) => s.key === 'host' || !!s.bot || seatConn(i) !== null);
 
   function hostLink() {
     if (H.conn) return;
@@ -134,7 +135,7 @@
     }
     if (m.t === 'claim') {
       const want = Number(m.seat), key = String(H.ids[id] || '').replace(/\?$/, '');
-      if (!key || !H.seats[want] || H.seats[want].key === 'host' || seatConn(want) !== null) {
+      if (!key || !H.seats[want] || H.seats[want].key === 'host' || H.seats[want].bot || seatConn(want) !== null) {
         return hostSend([id], { t: 'full', started: net.inGame, seats: offlineSeats() });
       }
       H.seats[want].key = key;
@@ -157,7 +158,7 @@
 
   function offlineSeats() {
     return H.seats.map((s, i) => ({ i, name: s.name, figure: s.figure, color: T.PLAYER[i] }))
-      .filter(s => H.seats[s.i].key !== 'host' && seatConn(s.i) === null);
+      .filter(s => H.seats[s.i].key !== 'host' && !H.seats[s.i].bot && seatConn(s.i) === null);
   }
 
   function seatsChanged() {
@@ -167,7 +168,7 @@
   }
 
   function lobbyBroadcast() {
-    const seats = H.seats.map((s, i) => ({ name: s.name, figure: s.figure, color: T.PLAYER[i], online: s.key === 'host' || seatConn(i) !== null }));
+    const seats = H.seats.map((s, i) => ({ name: s.name, figure: s.figure, color: T.PLAYER[i], bot: !!s.bot, online: s.key === 'host' || !!s.bot || seatConn(i) !== null }));
     H.seats.forEach((s, i) => {
       const id = seatConn(i);
       if (id !== null) hostSend([id], { t: 'lobby', seats, you: i, minutes: H.minutes, rules: H.rules });
@@ -228,7 +229,7 @@
 
   function saveNet() {
     const G = net.ui && net.ui.getState();
-    store.set(NET_SAVE, G ? { G, seats: H.seats.map(s => ({ key: s.key, name: s.name, figure: s.figure })), minutes: H.minutes, rules: H.rules } : null);
+    store.set(NET_SAVE, G ? { G, seats: H.seats.map(s => ({ key: s.key, name: s.name, figure: s.figure, bot: !!s.bot })), minutes: H.minutes, rules: H.rules } : null);
   }
 
   function openLobby() {
@@ -247,7 +248,7 @@
     if (H.seats.length < 2) return;
     const h = H.seats[0];
     store.set(ME_KEY, { name: h.name, figure: h.figure });
-    const players = H.seats.map((s, i) => ({ name: s.name, color: T.PLAYER[i], figure: s.figure }));
+    const players = H.seats.map((s, i) => ({ name: s.name, color: T.PLAYER[i], figure: s.figure, bot: !!s.bot }));
     net.inGame = true; net.me = 0; net.online = onlineList();
     net.ui.startNetGame(players, H.minutes, H.rules);
     saveNet();
@@ -356,7 +357,7 @@
 
   function seatRows(seats, you, removable) {
     return seats.map((s, i) => `<div class="seat${i === you ? ' you' : ''}">${tok(s.figure, s.color, 38)}
-      <span class="nm">${esc(s.name)}${i === you ? ' <em>вы</em>' : ''}${i === 0 ? ' <em>хост</em>' : ''}</span>
+      <span class="nm">${esc(s.name)}${i === you ? ' <em>вы</em>' : ''}${i === 0 ? ' <em>хост</em>' : ''}${s.bot ? ' <em class="bot">бот</em>' : ''}</span>
       <span class="dot${s.online ? ' on' : ''}" title="${s.online ? 'на связи' : 'нет связи'}"></span>
       ${removable && i > 0 ? `<button type="button" class="btn sm ghost" data-net="kick" data-i="${i}" aria-label="Убрать ${esc(s.name)}">✕</button>` : ''}</div>`).join('');
   }
@@ -373,7 +374,7 @@
     if (!el || el.hidden) return;
     let h = `<header class="setup-head"><h1 class="logo">Баай</h1><p class="tagline">Игра по Wi-Fi</p></header>`;
     if (mode === 'host') {
-      const seats = H.seats.map((s, i) => ({ name: s.name, figure: s.figure, color: T.PLAYER[i], online: s.key === 'host' || seatConn(i) !== null }));
+      const seats = H.seats.map((s, i) => ({ name: s.name, figure: s.figure, color: T.PLAYER[i], bot: !!s.bot, online: s.key === 'host' || !!s.bot || seatConn(i) !== null }));
       const me = H.seats[0];
       h += '<div class="panel qr-panel">';
       if (!H.linked) h += '<p class="notice bad">Сервер игры не отвечает. Перезапустите приложение.</p>';
@@ -391,7 +392,9 @@
         <input id="net-name" type="text" maxlength="14" value="${esc(me.name)}" aria-label="Ваше имя">
         ${figurePicker(me.figure, H.seats.slice(1).map(s => s.figure), T.PLAYER[0])}</div>`;
       h += `<div class="panel"><h2 class="h2">Игроки · ${seats.length} из 6</h2>${seatRows(seats, 0, true)}
-        ${seats.length < 2 ? '<p class="hint">Ждём, когда подключится хотя бы один игрок.</p>' : ''}</div>`;
+        ${seats.length < 2 ? '<p class="hint">Ждём, когда подключится хотя бы один игрок, или добавьте бота.</p>' : ''}
+        ${seats.length < 6 ? '<button type="button" class="btn" data-net="addBot">Добавить бота</button>' : ''}
+        ${seats.some(s => s.bot) ? '<p class="hint">Боты ходят сами, их ходы делает этот телефон. Если подключится ещё человек, а мест нет, уберите бота.</p>' : ''}</div>`;
       h += `<div class="panel"><h2 class="h2">Ограничение по времени</h2><div class="seg">${[[0, 'Нет'], [30, '30 мин'], [60, '60 мин'], [90, '90 мин']].map(([m, t]) =>
         `<button type="button" role="radio" aria-checked="${m === H.minutes}" data-net="min" data-m="${m}">${t}</button>`).join('')}</div></div>`;
       h += `<div class="panel"><h2 class="h2">Правила партии</h2><div class="rules">${net.ui.rulesHTML(H.rules, 'data-nrule')}</div></div>`;
@@ -437,6 +440,12 @@
       if (what === 'min') { H.minutes = Number(t.dataset.m); return seatsChanged(); }
       if (what === 'ip') { H.ip = t.dataset.ip; return renderLobby(); }
       if (what === 'refresh') { H.ips = hostIps(); if (!H.ips.includes(H.ip)) H.ip = H.ips[0] || ''; return renderLobby(); }
+      if (what === 'addBot' && H.seats.length < 6) {
+        const used = H.seats.map(x => x.name.toLowerCase());
+        const name = BAAI.bot.NAMES.find(n => !used.includes(n.toLowerCase())) || `Бот ${H.seats.length + 1}`;
+        H.seats.push({ key: 'bot:' + Math.random().toString(36).slice(2, 8), name, figure: freeFigure(H.seats, '', -1), bot: true });
+        return seatsChanged();
+      }
       if (what === 'start') return startNet();
       if (what === 'back') { leaveHost(); $('lobby').hidden = true; net.ui.showSetup(); return; }
     } else {

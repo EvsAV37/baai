@@ -19,10 +19,22 @@
 
   const NET = BAAI.net || { inGame: false, isClient: () => false, isHost: () => false, canHost: false, hasSave: () => false };
   const netGame = () => NET.inGame;
-  // Чей это телефон: в сетевой игре — свой игрок, на одном телефоне — тот, чей ход
-  const me = () => netGame() ? NET.me : G.turn;
-  // Действует ли сейчас владелец этого телефона
-  const myMove = () => !netGame() || E.actor(G) === NET.me;
+  const BOT = BAAI.bot;
+  const isBot = i => !!(G && G.players[i] && G.players[i].bot);
+  const humans = () => G.players.filter(p => !p.bot).length;
+  // У кого сейчас телефон (одна игра на телефоне): человек, которому его передали последним
+  let holder = null;
+  function viewer() {
+    if (holder !== null && G.players[holder] && !isBot(holder)) return holder;
+    const a = E.actor(G);
+    if (!isBot(a)) return a;
+    const h = G.players.findIndex(p => !p.bot);
+    return h < 0 ? a : h;
+  }
+  // Чей это телефон: в сетевой игре — свой игрок, на одном телефоне — тот, у кого он в руках
+  const me = () => netGame() ? NET.me : viewer();
+  // Действует ли сейчас владелец этого телефона (за ботов ходит сам телефон)
+  const myMove = () => netGame() ? E.actor(G) === NET.me : !isBot(E.actor(G));
   const SAVE_KEY = 'baai.save.v2';
   const SETUP_KEY = 'baai.setup.v2';
   const DECK_ABOUT = {
@@ -33,7 +45,8 @@
   let G = null;
   let shownCard = 0;
   let board = null;
-  let setup = { count: 3, minutes: 0, names: [], figures: ['horse', 'deer', 'choron', 'khomus', 'bear', 'crane'], rules: null };
+  let setup = { count: 3, bots: 0, minutes: 0, names: [], figures: ['horse', 'deer', 'choron', 'khomus', 'bear', 'crane'], rules: null };
+  let botT = 0;        // таймер хода бота
   let trade = null;   // черновик обмена
   let loan = null;    // черновик кредита
   let lastSnap = null; // что было на экране в прошлый раз — по разнице играем звуки и анимации
@@ -79,7 +92,7 @@
   // Видно ли сейчас деньги игрока i
   function seesMoney(i) {
     if (!G || G.rules.money !== 'hidden' || G.phase === 'over') return true;
-    return i === (netGame() ? NET.me : E.actor(G));
+    return i === me();
   }
   const moneyOf = (i, v) => seesMoney(i) ? rub(v === undefined ? G.players[i].money : v) : '••• ₽';
 
@@ -87,7 +100,7 @@
   const ROLE_BTN = { uus: 'Дом без группы', bulchut: 'Засада', atyyhyt: 'Забрать по стартовой цене', kayur: 'Упряжка на транспорт', toyon: 'Созвать сход', olonkhosut: 'Забрать приз сказанием' };
   const roleOf = i => (G.players[i] && E.ROLE[G.players[i].role]) || null;
   // Чья роль видна этому телефону: своя всегда, чужая — когда раскрыта
-  const seesRole = i => G.players[i].roleShown || G.phase === 'over' || (netGame() ? i === NET.me : i === E.actor(G));
+  const seesRole = i => G.players[i].roleShown || G.phase === 'over' || i === me();
 
   function roleCardHTML(r, used, act) {
     return `<div class="role-card">
@@ -129,8 +142,15 @@
   function renderSetup() {
     $('rules-box').innerHTML = rulesHTML(setup.rules, 'data-rule');
     $('setup-medals').innerHTML = T.FIGURES.map((f, i) => T.tokenSVG(f.id, T.PLAYER[i], 34)).join('');
-    $('count-seg').innerHTML = [2, 3, 4, 5, 6].map(n =>
+    $('count-seg').innerHTML = [1, 2, 3, 4, 5, 6].map(n =>
       `<button type="button" role="radio" aria-checked="${n === setup.count}" data-n="${n}">${n}</button>`).join('');
+    $('bots-seg').innerHTML = [0, 1, 2, 3, 4, 5].map(n =>
+      `<button type="button" role="radio" aria-checked="${n === setup.bots}" data-b="${n}" ${n + setup.count > 6 || n + setup.count < 2 ? 'disabled' : ''}>${n}</button>`).join('');
+    $('bot-names').innerHTML = botNames().map((nm, k) => {
+      const i = setup.count + k, fig = T.FIGURES.find(f => f.id === setup.figures[i]);
+      return `<div class="bot-row"><button type="button" class="fig" data-fig="${i}" aria-label="Фишка бота ${esc(nm)}: ${fig.name}. Сменить">${T.tokenSVG(setup.figures[i], T.PLAYER[i], 46)}</button>
+        <span class="nm">${esc(nm)}</span><em>бот</em></div>`;
+    }).join('');
     $('time-seg').innerHTML = [[0, 'Нет'], [30, '30 мин'], [60, '60 мин'], [90, '90 мин']].map(([m, t]) =>
       `<button type="button" role="radio" aria-checked="${m === setup.minutes}" data-m="${m}">${t}</button>`).join('');
     let html = '';
@@ -148,6 +168,19 @@
     $('btn-net-resume').hidden = !NET.hasSave();
   }
 
+  // Имена ботов: якутские, не совпадают с именами людей
+  function botNames() {
+    const taken = setup.names.slice(0, setup.count).map(n => (n || '').toLowerCase());
+    return BOT.NAMES.filter(n => !taken.includes(n.toLowerCase())).slice(0, setup.bots);
+  }
+
+  // Людей 1–6, ботов 0–5, всего от 2 до 6
+  function fixCounts(changed) {
+    if (changed === 'count' && setup.count + setup.bots > 6) setup.bots = 6 - setup.count;
+    if (changed === 'bots' && setup.count + setup.bots > 6) setup.count = 6 - setup.bots;
+    if (setup.count + setup.bots < 2) setup.bots = 2 - setup.count;
+  }
+
   function readNames() {
     for (let i = 0; i < setup.count; i++) {
       const el = $('name-' + i);
@@ -158,7 +191,7 @@
   // Следующая фигурка, которую не взял никто из играющих
   function nextFigure(i) {
     const ids = T.FIGURES.map(f => f.id);
-    const taken = setup.figures.slice(0, setup.count).filter((_, k) => k !== i);
+    const taken = setup.figures.slice(0, setup.count + setup.bots).filter((_, k) => k !== i);
     let k = ids.indexOf(setup.figures[i]);
     for (let n = 0; n < ids.length; n++) {
       k = (k + 1) % ids.length;
@@ -175,12 +208,14 @@
     store.set(SETUP_KEY, setup);
     const players = [];
     for (let i = 0; i < setup.count; i++) players.push({ name: setup.names[i] || `Игрок ${i + 1}`, color: T.PLAYER[i], figure: setup.figures[i] });
+    botNames().forEach((name, k) => { const i = setup.count + k; players.push({ name, color: T.PLAYER[i], figure: setup.figures[i], bot: true }); });
     G = E.create(players, { minutes: setup.minutes, rules: setup.rules });
     G.log.push(`— Ход: ${G.players[0].name}`);
     shownCard = 0;
+    holder = G.phase === 'roles' && humans() > 1 ? null : 0;
     save();
     showGame(true);
-    if (G.phase === 'roles') showHandoff();
+    maybeHandoff();
   }
 
   function showGame(fresh) {
@@ -192,6 +227,7 @@
     else if (fresh) board.reset();
     lastSnap = null; heldMoney = null;
     render({ turnChanged: true });
+    botTick();
   }
 
   function showSetup() {
@@ -227,7 +263,7 @@
     else if (G.phase === 'roll') msg = 'Бросай кубики';
     else msg = BOARD[pl.pos].name;
     const dice = G.dice && G.phase !== 'auction' && G.phase !== 'offer' ? `<div class="dice" id="dice">${dieHTML(G.dice[0])}${dieHTML(G.dice[1])}</div>` : '';
-    const you = netGame() && who === NET.me ? ' <em class="you">ваш ход</em>' : '';
+    const you = netGame() && who === NET.me ? ' <em class="you">ваш ход</em>' : pl.bot ? ' <em class="you bot">бот</em>' : '';
     return `${token(pl, 40)}<div class="col"><div class="who">${esc(pl.name)}${you}</div><div class="msg">${esc(msg)}</div></div>${dice}`;
   }
 
@@ -328,8 +364,8 @@
       return `<div class="notice">${esc(pl.name)} ${o.kind === 'trade' ? `решает, меняться ли с игроком ${esc(G.players[o.from].name)}` : `решает, дать ли в долг игроку ${esc(G.players[o.from].name)}`}.${leftHTML()}</div>`;
     }
     const off = NET.online && !NET.online[who] ? ' Игрок сейчас без связи — ждём, пока переподключится.' : '';
-    const out = G.players[NET.me] && G.players[NET.me].bankrupt ? '<p class="sub">Вы выбыли из игры, но можете смотреть до конца.</p>' : '';
-    return `<div class="notice wait">Ходит <b>${esc(pl.name)}</b>.${off}</div>${out}`;
+    const out = netGame() && G.players[NET.me] && G.players[NET.me].bankrupt ? '<p class="sub">Вы выбыли из игры, но можете смотреть до конца.</p>' : '';
+    return `<div class="notice wait">Ходит <b>${esc(pl.name)}</b>${pl.bot ? ' (бот)' : ''}.${off}</div>${out}`;
   }
 
   function renderActions() {
@@ -408,6 +444,7 @@
       if (p.loan) tags.push(`долг ${rub(p.loan.owe)}`);
       if (p.freeCards.length) tags.push(`вездеход ×${p.freeCards.length}`);
       if (netGame() && i === NET.me) tags.unshift('вы');
+      if (p.bot) tags.unshift('бот');
       if (roleOf(i) && G.players[i].roleShown) tags.push(roleOf(i).name);
       if (netGame() && NET.online && !NET.online[i] && !p.bankrupt) tags.push('нет связи');
       const money = heldMoney && heldMoney[i] !== undefined ? heldMoney[i] : p.money;
@@ -575,12 +612,12 @@
     if (ev.jailIn.length) { FX.play('wind'); FX.vibe([30, 40, 30]); }
     if (ev.auctionStart) FX.play('gavel');
     else if (ev.bid) FX.play('bid');
-    const mineNow = netGame() ? E.actor(G) === NET.me : true;
+    const mineNow = netGame() ? E.actor(G) === NET.me : !isBot(E.actor(G));
     if (G.phase === 'over') return;
     if (ev.offer && mineNow) { FX.play('offer'); FX.vibe([60, 50, 60]); }
     else if (ev.actorChanged && G.phase === 'roll' && !ev.jailIn.length) {
       if (netGame() && E.actor(G) === NET.me) { FX.play('turn'); FX.vibe(120); }
-      else if (!netGame()) FX.play('turn');
+      else if (!netGame() && !isBot(E.actor(G))) FX.play('turn');
     }
   }
 
@@ -650,6 +687,13 @@
     openKind('card', `<div class="card-wrap"><div class="card-face ${card.deck}">${ic}
         <div class="deck">${esc(card.title)}</div><p>${esc(card.text)}</p></div></div>
       ${btn('Понятно', 'close', 'primary big')}`);
+    // карточку бота убираем сами — человеку не надо её закрывать
+    if (isBot(card.player)) {
+      const sheet = $('sheet');
+      sheet.querySelector('.deck').textContent = `${card.title} · ${G.players[card.player].name}`;
+      setTimeout(() => { if (sheetIs('card') && sheet.dataset.seq === String(card.seq)) closeSheet(); }, botFast ? 1600 : 2800);
+    }
+    $('sheet').dataset.seq = card.seq;
   }
 
   function showCell(i) {
@@ -826,6 +870,7 @@
       ${btn('Правила кратко', 'rules')}
       <div class="toggles">${btn(`${icon(FX.sound ? 'sound' : 'mute', 'currentColor', 2.2)}${FX.sound ? 'Звук включён' : 'Звук выключен'}`, 'fxSound', 'sm ic', false, `aria-pressed="${FX.sound}"`)}
       ${FX.canVibe ? btn(`${icon('vibe', 'currentColor', 2.2)}${FX.vibe ? 'Вибрация включена' : 'Вибрация выключена'}`, 'fxVibe', 'sm ic', false, `aria-pressed="${FX.vibe}"`) : ''}</div>
+      ${G && G.players.some(p => p.bot) && !NET.isClient() ? btn(`${icon('sled', 'currentColor', 2.2)}${botFast ? 'Боты ходят быстро' : 'Боты ходят обычно'}`, 'botSpeed', 'sm ic', false, `aria-pressed="${botFast}"`) : ''}
       ${NET.isHost() ? btn('QR для подключения', 'showQr') : ''}
       ${NET.isClient() ? '' : btn('Новая партия', 'askNew')}
       ${btn('Закрыть', 'close', 'ghost')}`);
@@ -854,6 +899,7 @@
   // Передать телефон тому, кто сейчас действует
   function showHandoff() {
     const who = E.actor(G), pl = G.players[who];
+    holder = who;
     let sub = 'Передайте телефон', what = G.rules.money === 'hidden' ? 'Ваш ход' : rub(pl.money), go = 'Мой ход';
     if (G.phase === 'roles') {
       sub = 'Тайная роль · остальные не смотрят';
@@ -880,6 +926,34 @@
       ${btn(go, 'close', 'primary big')}`);
   }
 
+  // Передать телефон, если теперь действует другой человек (боты ходят сами)
+  function maybeHandoff() {
+    if (netGame() || !G || G.phase === 'over') return;
+    const a = E.actor(G);
+    if (isBot(a)) return;
+    if (humans() <= 1) { holder = a; return; }
+    if (a !== holder) showHandoff();
+  }
+
+  // ---------- боты ----------
+  let botFast = store.get('baai.botfast') === true;
+  // Если сейчас ходит бот — через паузу делаем его ход. Ходы ботов делает этот телефон (или хост)
+  function botTick(last) {
+    clearTimeout(botT);
+    if (!G || G.phase === 'over' || NET.isClient() || $('game').hidden || !isBot(E.actor(G))) return;
+    const wait = BOT.delay(G, last) * (botFast ? 0.45 : 1);
+    botT = setTimeout(() => {
+      if (!G || G.phase === 'over' || !isBot(E.actor(G))) return;
+      const o = G.phase === 'offer' ? G.offer : null;
+      const a = BOT.step(G, x => applyAction(x, { remote: true, bot: true }));
+      if (o && a && (a.type === 'accept' || a.type === 'reject') && (!netGame() || o.from === NET.me) && !isBot(o.from)) {
+        const nm = G.players[a.player].name;
+        toast(a.type === 'accept' ? `${nm}: ${o.kind === 'trade' ? 'обмен принят' : 'даёт в долг'}` : `${nm}: ${o.kind === 'trade' ? 'от обмена отказывается' : 'в долг не даёт'}`);
+      }
+      botTick(a);
+    }, wait);
+  }
+
   let toastT = 0;
   function toast(t) {
     const el = $('toast');
@@ -892,6 +966,7 @@
   function send(type, extra) {
     const a = Object.assign({ type, player: netGame() ? NET.me : E.actor(G) }, extra || {});
     if (NET.isClient()) return NET.send(a);
+    if (!netGame()) holder = a.player;
     const r = applyAction(a, {});
     if (!r.ok) toast(r.error);
     return r.ok;
@@ -907,6 +982,7 @@
     const opts = { rolled: a.type === 'roll' || a.type === 'reroll', turnChanged: G.turn !== before };
     if (netGame()) NET.publish(opts);
     afterChange(opts, a, actorBefore, !!(how && how.remote));
+    if (!(how && how.bot)) botTick(a);
     return r;
   }
 
@@ -918,6 +994,7 @@
       if (sheetOpen && (kind === 'trade' || kind === 'loan' || kind === 'menu') && !myMove()) closeSheet();
       render(opts);
       if (sheetOpen && kind.startsWith('cell:') && !$('sheet').hidden && $('sheet').dataset.kind === kind) showCell(Number(kind.slice(5)));
+      maybeHandoff();
       return;
     }
     if (sheetOpen && kind.startsWith('cell:') && ['build', 'sell', 'mortgage', 'unmortgage'].includes(a.type) && E.actor(G) === actorBefore) {
@@ -925,7 +1002,7 @@
     }
     closeSheet();
     render(opts);
-    if (!netGame() && G.phase !== 'over' && E.actor(G) !== actorBefore) showHandoff();
+    maybeHandoff();
   }
 
   // Игрок: пришло новое состояние от хоста
@@ -965,11 +1042,13 @@
       case 'fxSound': FX.toggle('sound'); showMenu(); return;
       case 'fxVibe': FX.toggle('vibe'); showMenu(); return;
       case 'showQr': showQr(); return;
+      case 'botSpeed': botFast = !botFast; store.set('baai.botfast', botFast); showMenu(); return;
       case 'askNew':
         openKind('ask', `<h3>Начать новую партию?</h3><p>Текущая партия будет удалена.</p>
           ${btn('Да, новая партия', 'newGame', 'danger')}${btn('Отмена', 'close', 'ghost')}`);
         return;
       case 'newGame':
+        clearTimeout(botT);
         if (netGame()) { G = null; closeSheet(); NET.backToLobby(); return; }
         G = null; store.set(SAVE_KEY, null); showSetup(); return;
 
@@ -1039,6 +1118,8 @@
     splash();
     const saved = store.get(SETUP_KEY);
     if (saved && saved.figures && saved.figures.length === 6) setup = Object.assign(setup, saved);
+    setup.bots = Math.max(0, Math.min(5, Number(setup.bots) || 0));
+    fixCounts('count');
     document.addEventListener('click', onClick);
     document.addEventListener('keydown', e => {
       if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"]')) { e.preventDefault(); e.target.click(); }
@@ -1049,10 +1130,14 @@
     $('btn-all').addEventListener('click', () => board && board.showAll());
     $('prize').addEventListener('click', () => showCell(20));
     $('btn-start').addEventListener('click', startGame);
-    $('btn-resume').addEventListener('click', () => { G = E.migrate(store.get(SAVE_KEY)); if (G) { shownCard = G.card ? G.card.seq : 0; showGame(true); } });
+    $('btn-resume').addEventListener('click', () => { G = E.migrate(store.get(SAVE_KEY)); holder = null; if (G) { shownCard = G.card ? G.card.seq : 0; showGame(true); } });
     $('count-seg').addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;
-      readNames(); setup.count = Number(b.dataset.n); renderSetup();
+      readNames(); setup.count = Number(b.dataset.n); fixCounts('count'); renderSetup();
+    });
+    $('bots-seg').addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b || b.disabled) return;
+      readNames(); setup.bots = Number(b.dataset.b); fixCounts('bots'); renderSetup();
     });
     $('time-seg').addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;
@@ -1086,7 +1171,7 @@
         showGame(true);
         NET.publish({ turnChanged: true });
       },
-      leaveGame() { G = null; closeSheet(); $('game').hidden = true; },
+      leaveGame() { clearTimeout(botT); G = null; closeSheet(); $('game').hidden = true; },
     };
     if (NET.boot) NET.boot();
     if (NET.isClient()) return;

@@ -14,7 +14,7 @@ css = (root / 'css/style.css').read_text(encoding='utf-8')
 fragment = '--fragment' in sys.argv
 own = ''.join(
     f'<script>\n{(root / "js" / n).read_text(encoding="utf-8")}\n</script>\n'
-    for n in ('data.js', 'theme.js', 'fx.js', 'engine.js', 'board.js')
+    for n in ('data.js', 'theme.js', 'fx.js', 'engine.js', 'bot.js', 'board.js')
 ) + f'<script>\n{(root / "vendor/qrcode.js").read_text(encoding="utf-8")}\n</script>\n' + ''.join(
     f'<script>\n{(root / "js" / n).read_text(encoding="utf-8")}\n</script>\n'
     for n in ('net.js', 'ui.js')
