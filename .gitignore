@@ -1,2 +1,11 @@
 dist/baai-artifact.html
 node_modules/
+
+# снимки экрана из браузерных тестов
+/host.png
+/player.png
+/bots-local.png
+/bots-guest.png
+/victory-stats.png
+/slots.png
+/undo.png
