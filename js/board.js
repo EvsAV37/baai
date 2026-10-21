@@ -14,7 +14,8 @@
   // Мир поля 720×720, центр 360,360. Холст 1080×1080, базовый зум 1.5 — чётко на телефонах.
   const W = 720, CX = 360, CY = 360;
   const CANVAS = 1080, BASE = CANVAS / W;
-  const R = { rimOut: 356, out: 330, band: 306, icon: 292, text: 230, own: 168, ownW: 22, flake: 318, inn: 172, dots: 164, center: 156 };
+  // клетка от inn до out; у внутреннего края — полоса владельца; дальше к центру тёмное кольцо (dots) и белый круг
+  const R = { rimOut: 356, out: 330, band: 306, icon: 292, text: 228, own: 161, ownW: 19, flake: 318, inn: 150, dots: 142, center: 134 };
 
   // Угловые клетки вдвое шире обычных
   const SC = 16, SN = (360 - 4 * SC) / 36;
@@ -24,8 +25,8 @@
   const ang = i => START[i] + SPAN[i] / 2;          // клетка 0 внизу, ход по часовой
 
   const CORNER = { 0: ['СТАРТ', '+200 ₽'], 10: ['ЗИМОВЬЁ', 'в гостях'], 20: ['ЫСЫАХ', 'приз'], 30: ['ПУРГА!', '→ в зимовьё'] };
-  const TOKEN_R = [142];                             // где стоит фишка перед клеткой, внутри круга
-  const TOKEN_STEP = 22, TOKEN_MIN = 74;              // столбик: шаг между фишками и ближе к центру не заходим
+  const TOKEN_R = [116];                             // где стоит фишка перед клеткой, внутри круга
+  const TOKEN_STEP = 20, TOKEN_MIN = 52;              // столбик: шаг между фишками и ближе к центру не заходим
   const TOK = 33;
   const ICE = 0x1fa9f2;                              // ярко-голубой для снежинки залога
   const FONT = '"PT Sans Narrow", "Roboto Condensed", "Arial Narrow", sans-serif';
@@ -93,7 +94,7 @@
     o.push(`<circle cx="${CX}" cy="${CY}" r="${R.center}" fill="${C.snow}"/>`);
 
     // Аал Луук Мас — дерево жизни, по центру круга
-    o.push(`<g transform="translate(${CX} ${CY + 6}) scale(0.64)">${T.treeSVG()}</g>`);
+    o.push(`<g transform="translate(${CX} ${CY + 6}) scale(0.56)">${T.treeSVG()}</g>`);
     o.push('</svg>');
     return o.join('');
   }
@@ -168,10 +169,10 @@
         const a = ang(i);
         if (i % 10) {
           const name = BOARD[i].short.replace(/\u00AD/g, '');
-          const fs = Math.min(16, 92 / (name.length * 0.53));
+          const fs = Math.min(19, 104 / (name.length * 0.53));
           const [x, y] = polar(R.text, a);
           const rot = Math.cos(rad(a)) >= -0.001 ? a : a + 180;   // на левой половине разворачиваем
-          const t = txt(x, y, name, fs, rot, C.ink, true, 94);
+          const t = txt(x, y, name, fs, rot, C.ink, true, 104);
           this.labels[i] = { t, x, y, rot, sx: t.scaleX };
         } else {
           // угол: две строки поперёк радиуса, читаются прямо, когда угол внизу или вверху
@@ -237,7 +238,7 @@
         if (L.m === m) return;
         L.m = m;
         const dn = [-Math.sin(rad(L.rot)), Math.cos(rad(L.rot))];   // «вниз» для строки текста
-        const sh = m ? -6 : 0;
+        const sh = m ? -7 : 0;
         L.t.setPosition(L.x + dn[0] * sh, L.y + dn[1] * sh).setColor(m ? '#8aa3b5' : C.ink);
         if (m && !L.sub) {
           L.sub = this.add.text(0, 0, '', { fontFamily: FONT, fontSize: '12px', fontStyle: 'bold', color: C.deep })
@@ -247,8 +248,8 @@
           L.sub.setVisible(m);
           if (m) {
             L.sub.setScale(1).setText('выкуп ' + E.rub(E.unmortgageCost(i)));
-            if (L.sub.width > 90) L.sub.setScale(90 / L.sub.width);
-            L.sub.setPosition(L.x + dn[0] * 9, L.y + dn[1] * 9);
+            if (L.sub.width > 96) L.sub.setScale(96 / L.sub.width);
+            L.sub.setPosition(L.x + dn[0] * 10, L.y + dn[1] * 10);
           }
         }
       });
@@ -479,7 +480,7 @@
 
     followCell(cell, ms) {
       const a = ang(cell);
-      const [x, y] = polar(178, a);
+      const [x, y] = polar(165, a);
       this.camTo(BASE * 1.9, x, y, rad(90 - a), ms);     // клетка внизу экрана
     }
 
