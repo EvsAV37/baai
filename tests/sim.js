@@ -14,7 +14,7 @@ function bot(s) {
   const mine = cells().filter(i => s.own[i] && s.own[i].owner === p);
   switch (s.phase) {
     case 'auction': {
-      const A = s.auction, need = E.minBid(s), worth = BOARD[A.cell].price;
+      const A = s.auction, need = E.minBid(s), worth = E.price(s, A.cell);
       if (need <= pl.money && need <= worth * (0.6 + R() * 0.7) && R() < 0.75) {
         return { type: 'bid', amount: Math.min(pl.money, need + pick([0, 0, 40, 90])) };
       }
@@ -56,7 +56,7 @@ function bot(s) {
       return { type: 'endTurn' };
     }
     case 'buy': {
-      const price = BOARD[s.pending.cell].price;
+      const price = E.price(s, s.pending.cell);
       if (pl.money < price && R() < 0.3) {
         const m = mine.filter(i => E.canMortgage(s, p, i));
         if (m.length) return { type: 'mortgage', cell: m[0] };
@@ -103,7 +103,10 @@ function check(s) {
 
 for (let g = 0; g < 2000; g++) {
   const n = 2 + (g % 5);
-  const s = E.create(Array.from({ length: n }, (_, i) => ({ name: 'И' + i, color: D.COLORS[i] })));
+  // правила партии перебираем по битам номера партии
+  const rules = { auction: g & 1 ? 'sealed' : 'open', money: g & 2 ? 'hidden' : 'open', growth: g & 4 ? 'grow' : 'flat', prize: g & 8 ? 'off' : 'on' };
+  const s = E.create(Array.from({ length: n }, (_, i) => ({ name: 'И' + i, color: D.COLORS[i] })), { rules });
+  if (rules.auction === 'sealed') stat.sealed = (stat.sealed || 0) + 1;
   let steps = 0, prevPrize = 0;
   while (s.phase !== 'over' && steps < 30000) {
     steps++;
@@ -128,6 +131,9 @@ for (let g = 0; g < 2000; g++) {
     if (prevPrize > 0 && s.prize === 0) stat.prizes++;
     prevPrize = s.prize;
     check(s);
+    if (s.rules.prize === 'off' && s.prize) throw new Error('prize while off');
+    if (s.grow > 1.5 || (s.rules.growth !== 'grow' && s.grow !== 1)) throw new Error('grow ' + s.grow);
+    stat.maxGrow = Math.max(stat.maxGrow || 1, s.grow);
     if (a.type === 'endTurn') stat.turns++;
   }
   stat.games++; if (s.phase === 'over') stat.finished++;

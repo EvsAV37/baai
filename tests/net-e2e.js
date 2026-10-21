@@ -20,7 +20,17 @@ async function phone(browser, url, name) {
   return { ctx, page, name };
 }
 
-const state = p => p.page.evaluate(() => { const n = BAAI.net, G = n.ui.getState(); return G ? { seq: G.seq, phase: G.phase, json: JSON.stringify(G), me: n.me, actor: BAAI.engine.actor(G) } : null; });
+// суммы тайных ставок гостям не уходят — их не сравниваем, но проверяем, что у гостя их нет
+const state = p => p.page.evaluate(() => {
+  const n = BAAI.net, G = n.ui.getState();
+  if (!G) return null;
+  const bids = G.auction && G.auction.bids ? Object.values(G.auction.bids) : [];
+  const json = JSON.stringify(G, (k, v) => (k === 'bids' ? undefined : v));
+  return { seq: G.seq, phase: G.phase, json, me: n.me, actor: BAAI.engine.actor(G), bigBid: bids.some(v => v > 1), rules: G.rules };
+});
+
+// RULES=sealed — партия с тайным аукционом, скрытыми деньгами и ростом цен
+const SEALED = process.env.RULES === 'sealed';
 
 // Один шаг бота: если сейчас действует этот телефон — нажать подходящую кнопку
 async function step(p) {
@@ -33,7 +43,7 @@ async function step(p) {
     const pick = acts => btns.find(b => acts.includes(b.dataset.act));
     const r = Math.random();
     let b = null;
-    if (G.phase === 'auction') b = r < 0.5 ? pick(['bid']) : pick(['pass']);
+    if (G.phase === 'auction') b = r < 0.5 ? pick(['bid', 'sealedBid']) : pick(['pass']);
     else if (G.phase === 'offer') b = pick([r < 0.5 ? 'accept' : 'reject']);
     else if (G.phase === 'buy') b = r < 0.6 ? pick(['buy']) : pick(['decline']);
     else b = pick(['roll', 'payJail', 'payDebt', 'endTurn', 'bankrupt']);
@@ -63,6 +73,11 @@ async function step(p) {
     await sleep(500);
     const lobbyText = await host.page.locator('#lobby').innerText();
     if (!lobbyText.includes('Айаал')) fail('хост не видит новое имя игрока');
+    if (SEALED) {
+      for (const [k, v] of [['auction', 'sealed'], ['money', 'hidden'], ['growth', 'grow']]) await host.page.click(`[data-nrule="${k}"][data-v="${v}"]`);
+      await sleep(500);
+      if (!(await a.page.locator('#lobby').innerText()).includes('Тайный')) fail('гость не видит выбранные правила');
+    }
     await host.page.click('[data-net="start"]');
     await sleep(1500);
     for (const p of [host, a, b]) if (await p.page.locator('#game').isHidden()) fail(`${p.name}: игра не открылась`);
@@ -71,6 +86,7 @@ async function step(p) {
     let actions = 0, reconnected = false, timerChecked = false;
     for (let k = 0; k < 900 && actions < 260; k++) {
       for (const p of phones) { const r = await step(p); if (r && r !== 'none') actions++; }
+      if (SEALED && k % 10 === 0) for (const p of [a, b]) { const s = await state(p); if (s && s.bigBid) fail(`${p.name}: видит суммы тайных ставок`); if (s && s.rules.auction !== 'sealed') fail('правила не дошли до гостя'); }
       await sleep(60);
       // переподключение: игрок Б закрывает страницу и открывает снова
       if (!reconnected && actions > 60) {

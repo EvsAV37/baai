@@ -33,7 +33,7 @@
   let G = null;
   let shownCard = 0;
   let board = null;
-  let setup = { count: 3, minutes: 0, names: [], figures: ['horse', 'deer', 'choron', 'khomus', 'bear', 'crane'] };
+  let setup = { count: 3, minutes: 0, names: [], figures: ['horse', 'deer', 'choron', 'khomus', 'bear', 'crane'], rules: null };
   let trade = null;   // черновик обмена
   let loan = null;    // черновик кредита
   let lastSnap = null; // что было на экране в прошлый раз — по разнице играем звуки и анимации
@@ -47,8 +47,41 @@
   };
   const save = () => { if (!netGame()) store.set(SAVE_KEY, G); };
 
+  // ---------- правила партии ----------
+  const RULE_UI = [
+    { k: 'auction', icon: 'gavel', title: 'Аукцион', opts: [['open', 'Открытый'], ['sealed', 'Тайный']],
+      hint: { open: 'Ставки по кругу, все видят цену. Кто поставил больше всех, тот и покупает.',
+              sealed: 'Каждый один раз пишет ставку втайне. Потом ставки открываются, покупает самый щедрый.' } },
+    { k: 'money', icon: 'eye', title: 'Деньги соперников', opts: [['open', 'Видны'], ['hidden', 'Скрыты']],
+      hint: { open: 'Деньги каждого видны всем.', hidden: 'Каждый видит только свои деньги. Сколько у соперников — угадывайте.' } },
+    { k: 'growth', icon: 'grow', title: 'Цены', opts: [['flat', 'Постоянные'], ['grow', 'Растут']],
+      hint: { flat: 'Цены весь матч одни и те же.',
+              grow: `Каждые ${E.GROW_EVERY} кругов покупка, аренда, дома и налоги дорожают на 10%, до +50%. Партия не затягивается.` } },
+    { k: 'prize', icon: 'ysyakh', title: 'Приз Ысыаха', opts: [['on', 'Есть'], ['off', 'Нет']],
+      hint: { on: 'Налоги и проценты банку копятся в призе. Кто встал на «Ысыах», забирает всё.',
+              off: 'Налоги уходят банку, «Ысыах» — просто отдых.' } },
+  ];
+
+  // Панель правил; attr — имя data-атрибута для кнопок (на экране настройки и в комнате хоста разные)
+  function rulesHTML(rules, attr, readOnly) {
+    rules = E.normRules(rules);
+    return RULE_UI.map(r => `<div class="rule">
+      <h3 class="rule-h">${icon(r.icon, T.C.coral, 2.2)}${r.title}</h3>
+      ${readOnly ? `<p class="rule-v">${r.opts.find(o => o[0] === rules[r.k])[1]}</p>` : `<div class="seg" role="radiogroup" aria-label="${r.title}">${r.opts.map(([v, t]) =>
+        `<button type="button" role="radio" aria-checked="${v === rules[r.k]}" ${attr}="${r.k}" data-v="${v}">${t}</button>`).join('')}</div>`}
+      <p class="hint">${r.hint[rules[r.k]]}</p></div>`).join('');
+  }
+
+  // Видно ли сейчас деньги игрока i
+  function seesMoney(i) {
+    if (!G || G.rules.money !== 'hidden' || G.phase === 'over') return true;
+    return i === (netGame() ? NET.me : E.actor(G));
+  }
+  const moneyOf = (i, v) => seesMoney(i) ? rub(v === undefined ? G.players[i].money : v) : '••• ₽';
+
   // ---------- настройка партии ----------
   function renderSetup() {
+    $('rules-box').innerHTML = rulesHTML(setup.rules, 'data-rule');
     $('setup-medals').innerHTML = T.FIGURES.map((f, i) => T.tokenSVG(f.id, T.PLAYER[i], 34)).join('');
     $('count-seg').innerHTML = [2, 3, 4, 5, 6].map(n =>
       `<button type="button" role="radio" aria-checked="${n === setup.count}" data-n="${n}">${n}</button>`).join('');
@@ -96,7 +129,7 @@
     store.set(SETUP_KEY, setup);
     const players = [];
     for (let i = 0; i < setup.count; i++) players.push({ name: setup.names[i] || `Игрок ${i + 1}`, color: T.PLAYER[i], figure: setup.figures[i] });
-    G = E.create(players, { minutes: setup.minutes });
+    G = E.create(players, { minutes: setup.minutes, rules: setup.rules });
     G.log.push(`— Ход: ${G.players[0].name}`);
     shownCard = 0;
     save();
@@ -180,12 +213,30 @@
     return netGame() && NET.deadline ? '<p class="sub left" id="t-left"></p>' : '';
   }
 
+  // Тайный аукцион: каждый пишет одну ставку, её не видит никто
+  function sealedHTML(watch) {
+    const A = G.auction, c = BOARD[A.cell], pl = G.players[A.at];
+    const done = A.bidders.filter(i => A.bids[i] !== undefined).map(i => esc(G.players[i].name));
+    let h = `<div class="auction"><div class="a-head" style="--gc:${cellColor(c)}">${icon('gavel', '#ffffff', 2.2)}<div><b>Тайный аукцион</b><span>${esc(c.name)}</span></div></div>
+      <p>Ставки от <b>${rub(A.start)}</b>, цена клетки ${rub(E.price(G, A.cell))}. Каждый пишет одну ставку втайне — покупает тот, кто дал больше.</p>
+      <p class="sub">${done.length ? `Уже поставили: ${done.join(', ')}. ` : ''}Сейчас ставит ${esc(pl.name)}.</p>${leftHTML()}</div>`;
+    if (watch) return h + `<div class="act-row">${btn('О клетке', 'info', 'ghost', false, `data-cell="${A.cell}"`)}</div>`;
+    const top = Math.floor(pl.money / RULES.bidStep) * RULES.bidStep;
+    h += `<label class="money bid-in"><span>Ваша ставка</span><input id="sealed-bid" type="number" inputmode="numeric" min="${A.start}" step="${RULES.bidStep}" max="${pl.money}" value="${A.start}"><em>у вас ${rub(pl.money)}</em></label>
+      <div class="act-row bids">${[A.start, Math.min(top, E.price(G, A.cell)), top].filter((v, k, a) => v >= A.start && a.indexOf(v) === k)
+        .map(v => `<button type="button" class="btn sm" data-act="sealedSet" data-v="${v}">${rub(v)}</button>`).join('')}</div>
+      <div class="act-row">${btn('Поставить втайне', 'sealedBid', 'primary big')}</div>
+      <div class="act-row">${btn('Пас', 'pass', 'dark')}${btn('О клетке', 'info', 'ghost', false, `data-cell="${A.cell}"`)}</div>`;
+    return h;
+  }
+
   function auctionHTML(watch) {
+    if (G.auction.sealed) return sealedHTML(watch);
     const A = G.auction, c = BOARD[A.cell], pl = G.players[A.at];
     const min = E.minBid(G);
     const steps = A.leader === null ? [0, 50, 100] : [0, 40, 90];
     const lead = A.leader === null
-      ? `Торги открываются с <b>${rub(A.start)}</b> (половина цены ${rub(c.price)}).`
+      ? `Торги открываются с <b>${rub(A.start)}</b> (половина цены ${rub(E.price(G, A.cell))}).`
       : `Ставка сейчас: <b>${rub(A.price)}</b> — ${esc(G.players[A.leader].name)}.`;
     const bidders = A.bidders.map(i => esc(G.players[i].name)).join(', ');
     let h = `<div class="auction"><div class="a-head" style="--gc:${cellColor(c)}">${icon('gavel', '#ffffff', 2.2)}<div><b>Аукцион</b><span>${esc(c.name)}</span></div></div>
@@ -255,10 +306,10 @@
     } else if (G.phase === 'roll') {
       h += `<div class="act-row">${btn(G.extra ? 'Бросить ещё раз' : 'Бросить кубики', 'roll', 'primary big')}</div>`;
     } else if (G.phase === 'buy') {
-      const c = BOARD[G.pending.cell];
-      const short = pl.money < c.price;
+      const c = BOARD[G.pending.cell], cost = E.price(G, G.pending.cell);
+      const short = pl.money < cost;
       if (short) h += `<div class="notice bad">На ${esc(c.name)} не хватает денег. Можно заложить клетку или взять кредит. Если не купите, клетка уйдёт на аукцион.</div>`;
-      h += `<div class="act-row">${btn(`Купить ${rub(c.price)}`, 'buy', 'primary big', short)}${btn('На аукцион', 'decline', 'big')}</div>`;
+      h += `<div class="act-row">${btn(`Купить ${rub(cost)}`, 'buy', 'primary big', short)}${btn('На аукцион', 'decline', 'big')}</div>`;
       h += `<div class="act-row">${btn('Подробнее о клетке', 'info', 'ghost', false, `data-cell="${G.pending.cell}"`)}</div>`;
     } else if (G.phase === 'debt') {
       const d = G.pending;
@@ -297,7 +348,7 @@
       if (netGame() && NET.online && !NET.online[i] && !p.bankrupt) tags.push('нет связи');
       const money = heldMoney && heldMoney[i] !== undefined ? heldMoney[i] : p.money;
       return `<div class="pl${i === E.actor(G) ? ' cur' : ''}${p.bankrupt ? ' out' : ''}">${token(p, 36)}
-        <span class="col"><span class="nm">${esc(p.name)}</span><span class="mn">${p.bankrupt ? '—' : rub(money)}</span>${tags.length ? `<span class="tg">${tags.join(', ')}</span>` : ''}</span></div>`;
+        <span class="col"><span class="nm">${esc(p.name)}</span><span class="mn">${p.bankrupt ? '—' : moneyOf(i, money)}</span>${tags.length ? `<span class="tg">${tags.join(', ')}</span>` : ''}</span></div>`;
     }).join('');
   }
 
@@ -343,11 +394,11 @@
         const houses = c.type === 'prop' && E.groupHasHouses(G, c.group);
         if (houses) {
           btns = `<button type="button" class="btn sm" data-act="sell" data-cell="${i}" ${E.canSell(G, p, i) ? '' : 'disabled'} aria-label="Продать дом">−</button>
-            <button type="button" class="btn sm" data-act="build" data-cell="${i}" ${E.canBuild(G, p, i) && calm ? '' : 'disabled'} aria-label="Построить за ${GROUPS[c.group].house} ₽">+ ${GROUPS[c.group].house}</button>`;
+            <button type="button" class="btn sm" data-act="build" data-cell="${i}" ${E.canBuild(G, p, i) && calm ? '' : 'disabled'} aria-label="Построить за ${E.houseCost(G, c.group)} ₽">+ ${E.houseCost(G, c.group)}</button>`;
         } else if (o.mortgaged) {
           if (calm) btns = `<button type="button" class="btn sm" data-act="unmortgage" data-cell="${i}" ${E.canUnmortgage(G, p, i) ? '' : 'disabled'}>Выкуп</button>`;
         } else {
-          if (calm && E.canBuild(G, p, i)) btns += `<button type="button" class="btn sm" data-act="build" data-cell="${i}" aria-label="Построить за ${GROUPS[c.group].house} ₽">+ ${GROUPS[c.group].house}</button>`;
+          if (calm && E.canBuild(G, p, i)) btns += `<button type="button" class="btn sm" data-act="build" data-cell="${i}" aria-label="Построить за ${E.houseCost(G, c.group)} ₽">+ ${E.houseCost(G, c.group)}</button>`;
           btns += `<button type="button" class="btn sm" data-act="mortgage" data-cell="${i}" aria-label="Заложить за ${E.mortgageValue(i)} ₽">Залог</button>`;
         }
       }
@@ -363,11 +414,13 @@
 
   function renderTimer() {
     const el = $('timer');
-    if (!G || !G.endsAt || G.phase === 'over') { el.textContent = ''; return; }
+    const grow = G && G.grow > 1 && G.phase !== 'over' ? `цены +${Math.round((G.grow - 1) * 100)}%` : '';
+    el.title = grow;
+    if (!G || !G.endsAt || G.phase === 'over') { el.textContent = grow; return; }
     const left = Math.max(0, G.endsAt - Date.now() - (netGame() && NET.isClient() ? NET.skew : 0));
     if (!left) { el.textContent = 'Время вышло'; return; }
     const m = Math.floor(left / 60000), s = Math.floor(left / 1000) % 60;
-    el.textContent = `${m}:${String(s).padStart(2, '0')}`;
+    el.textContent = `${m}:${String(s).padStart(2, '0')}${grow ? ' · ' + grow : ''}`;
   }
 
   function renderPrize() {
@@ -545,38 +598,40 @@
       const g = GROUPS[c.group];
       const full = o && E.ownsGroup(G, o.owner, c.group);
       const cur = o && !o.mortgaged ? o.houses : -1;
+      const R = (h, f) => E.baseRent(G, i, h, f);
       const rows = [
-        ['Участок', c.rent[0], cur === 0 && !full],
-        ['Вся группа у владельца', c.rent[0] * 2, cur === 0 && full],
-        ['1 дом', c.rent[1], cur === 1], ['2 дома', c.rent[2], cur === 2],
-        ['3 дома', c.rent[3], cur === 3], ['4 дома', c.rent[4], cur === 4],
-        ['Отель', c.rent[5], cur === 5],
+        ['Участок', R(0, false), cur === 0 && !full],
+        ['Вся группа у владельца', R(0, true), cur === 0 && full],
+        ['1 дом', R(1), cur === 1], ['2 дома', R(2), cur === 2],
+        ['3 дома', R(3), cur === 3], ['4 дома', R(4), cur === 4],
+        ['Отель', R(5), cur === 5],
       ];
       h = head(c.name, g.name) + `<table class="rent"><tbody>
           ${rows.map(r => `<tr class="${r[2] ? 'on' : ''}"><td>${r[0]}</td><td>${rub(r[1])}</td></tr>`).join('')}
-          <tr><td>Цена участка</td><td>${rub(c.price)}</td></tr>
-          <tr><td>Дом или отель</td><td>${rub(g.house)}</td></tr>
+          <tr><td>Цена участка</td><td>${rub(E.price(G, i))}</td></tr>
+          <tr><td>Дом или отель</td><td>${rub(E.houseCost(G, c.group))}</td></tr>
           ${mortRows}${ownerRow}
         </tbody></table>`;
       if (o && o.owner === G.turn && myMove() && E.ownsGroup(G, G.turn, c.group) && !o.mortgaged && ['roll', 'end', 'debt', 'buy'].includes(G.phase)) {
-        h += `<div class="act-row">${btn('Продать дом', 'sell', '', !E.canSell(G, G.turn, i), `data-cell="${i}"`)}${btn(`Построить · ${rub(g.house)}`, 'build', 'primary', !E.canBuild(G, G.turn, i) || !['roll', 'end'].includes(G.phase), `data-cell="${i}"`)}</div>`;
+        h += `<div class="act-row">${btn('Продать дом', 'sell', '', !E.canSell(G, G.turn, i), `data-cell="${i}"`)}${btn(`Построить · ${rub(E.houseCost(G, c.group))}`, 'build', 'primary', !E.canBuild(G, G.turn, i) || !['roll', 'end'].includes(G.phase), `data-cell="${i}"`)}</div>`;
       }
     } else if (c.type === 'transport') {
       h = head(c.name, 'Транспорт') + `<table class="rent"><tbody>
-        ${[1, 2, 3, 4].map(n => `<tr><td>Если у владельца ${n} ${n === 1 ? 'транспорт' : 'транспорта'}</td><td>${rub(RULES.transportRent[n])}</td></tr>`).join('')}
-        <tr><td>Цена</td><td>${rub(c.price)}</td></tr>${mortRows}${ownerRow}</tbody></table>`;
+        ${[1, 2, 3, 4].map(n => `<tr><td>Если у владельца ${n} ${n === 1 ? 'транспорт' : 'транспорта'}</td><td>${rub(E.up(G, RULES.transportRent[n]))}</td></tr>`).join('')}
+        <tr><td>Цена</td><td>${rub(E.price(G, i))}</td></tr>${mortRows}${ownerRow}</tbody></table>`;
     } else if (c.type === 'utility') {
       h = head(c.name, 'Коммуналка') + `<table class="rent"><tbody>
         <tr><td>Одна у владельца</td><td>4 × сумма кубиков</td></tr>
         <tr><td>Обе у владельца</td><td>10 × сумма кубиков</td></tr>
-        <tr><td>Цена</td><td>${rub(c.price)}</td></tr>${mortRows}${ownerRow}</tbody></table>`;
+        <tr><td>Цена</td><td>${rub(E.price(G, i))}</td></tr>${mortRows}${ownerRow}</tbody></table>`;
     } else {
       const about = {
         start: `Каждый раз, когда проходишь Старт или встаёшь на него, получаешь ${rub(RULES.passStart)}.`,
         jail: 'Сюда попадают из-за пурги. Выбраться можно дублем (пурга стихла), вызвав вездеход за 50 ₽ или по карте «Попутный вездеход». После третьей попытки вездеход обязателен. Если пришёл сюда обычным ходом, ты просто в гостях.',
-        parking: `Праздник Ысыах. В Приз Ысыаха копятся налоги и проценты по кредитам банка. Кто встал сюда, забирает приз. Сейчас в призе: ${rub(G.prize)}.`,
+        parking: G.rules.prize === 'off' ? 'Праздник Ысыах. В этой партии приза нет — просто отдыхаешь.'
+          : `Праздник Ысыах. В Приз Ысыаха копятся налоги и проценты по кредитам банка. Кто встал сюда, забирает приз. Сейчас в призе: ${rub(G.prize)}.`,
         gotojail: 'Пурга! Тебя заметает в пути: отправляйся прямо в зимовьё, Старт не проходишь, 200 ₽ не получаешь.',
-        tax: `Заплати ${rub(c.amount || 0)}. Деньги уходят в Приз Ысыаха.`,
+        tax: `Заплати ${rub(E.taxOf(G, i))}. ${G.rules.prize === 'off' ? 'Деньги уходят банку.' : 'Деньги уходят в Приз Ысыаха.'}`,
         bayanai: DECK_ABOUT.bayanai,
         tyusyulge: DECK_ABOUT.tyusyulge,
       }[c.type];
@@ -636,7 +691,7 @@
         <label class="money"><span>Деньги</span><input id="t-give" type="number" inputmode="numeric" min="0" step="10" max="${me.money}" value="${trade.give.money || ''}" placeholder="0"><em>из ${rub(me.money)}</em></label>
         ${cardStepper(G.turn, 'give')}</section>
       <section class="tside"><h4>Вы получаете · ${esc(them.name)}</h4>${cellChips(trade.to, 'get')}
-        <label class="money"><span>Деньги</span><input id="t-get" type="number" inputmode="numeric" min="0" step="10" max="${them.money}" value="${trade.get.money || ''}" placeholder="0"><em>из ${rub(them.money)}</em></label>
+        <label class="money"><span>Деньги</span><input id="t-get" type="number" inputmode="numeric" min="0" step="10" max="${them.money}" value="${trade.get.money || ''}" placeholder="0"><em>${seesMoney(trade.to) ? 'из ' + rub(them.money) : 'сколько есть — не видно'}</em></label>
         ${cardStepper(trade.to, 'get')}</section>
       <p class="sub">За каждую полученную заложенную клетку (❄) платится банку 10% залога. ${esc(them.name)} увидит предложение и решит.</p>
       ${btn('Предложить', 'tSend', 'primary big')}${btn('Отмена', 'close', 'ghost')}`);
@@ -678,7 +733,7 @@
         <b>${rub(loan.amount)}</b><button type="button" class="btn sm" data-act="lStep" data-d="1" ${loan.amount + RULES.loanStep <= max ? '' : 'disabled'} aria-label="Больше">+</button></div>
         <h4>Процент</h4><div class="seg" role="radiogroup" aria-label="Процент">${RULES.loanRates.map(v => `<button type="button" role="radio" aria-checked="${v === loan.rate}" data-act="lRate" data-v="${v}">${v}%</button>`).join('')}</div>
         <h4>Срок</h4><div class="seg" role="radiogroup" aria-label="Срок">${RULES.loanLaps.map(v => `<button type="button" role="radio" aria-checked="${v === loan.laps}" data-act="lLaps" data-v="${v}">${laps(v)}</button>`).join('')}</div>`;
-      note = `Нужно согласие игрока ${esc(L.name)}: ${netGame() ? 'запрос придёт на его телефон' : 'передайте телефон'}. Денег у игрока: ${rub(L.money)}.`;
+      note = `Нужно согласие игрока ${esc(L.name)}: ${netGame() ? 'запрос придёт на его телефон' : 'передайте телефон'}. ${seesMoney(loan.from) ? `Денег у игрока: ${rub(L.money)}.` : ''}`;
     }
     const owe = Math.round(loan.amount * (1 + rate / 100));
     h += `<h4>Сумма</h4>${amountRow}
@@ -733,8 +788,12 @@
   // Передать телефон тому, кто сейчас действует
   function showHandoff() {
     const who = E.actor(G), pl = G.players[who];
-    let sub = 'Передайте телефон', what = rub(pl.money), go = 'Мой ход';
-    if (G.phase === 'auction') {
+    let sub = 'Передайте телефон', what = G.rules.money === 'hidden' ? 'Ваш ход' : rub(pl.money), go = 'Мой ход';
+    if (G.phase === 'auction' && G.auction.sealed) {
+      sub = 'Тайный аукцион · остальные не смотрят';
+      what = `${BOARD[G.auction.cell].name}: ставки от ${rub(G.auction.start)}`;
+      go = 'Сделать ставку';
+    } else if (G.phase === 'auction') {
       const A = G.auction;
       sub = 'Аукцион · передайте телефон';
       what = `${BOARD[A.cell].name}: ${A.leader === null ? 'торги с ' + rub(A.start) : 'ставка ' + rub(A.price)}`;
@@ -878,6 +937,8 @@
       case 'loanRepay': send('repayLoan'); return;
 
       case 'bid': send('bid', { amount: num('amount') }); return;
+      case 'sealedSet': { const el = $('sealed-bid'); if (el) el.value = num('v'); return; }
+      case 'sealedBid': { const el = $('sealed-bid'); send('bid', { amount: Math.floor(Number(el && el.value) || 0) }); return; }
       default:
         if (G) send(act, cell !== undefined ? { cell } : undefined);
     }
@@ -914,6 +975,10 @@
       const b = e.target.closest('button'); if (!b) return;
       readNames(); setup.minutes = Number(b.dataset.m); renderSetup();
     });
+    $('rules-box').addEventListener('click', e => {
+      const b = e.target.closest('[data-rule]'); if (!b) return;
+      readNames(); setup.rules = Object.assign(E.normRules(setup.rules), { [b.dataset.rule]: b.dataset.v }); renderSetup();
+    });
     setInterval(() => { renderTimer(); if (G) tickLeft(); }, 1000);
     $('btn-net').addEventListener('click', () => { readNames(); NET.openLobby(); });
     $('btn-net-resume').addEventListener('click', () => NET.resume());
@@ -925,8 +990,9 @@
       toast,
       showSetup,
       refresh() { if (G && !$('game').hidden) render({}); },
-      startNetGame(players, minutes) {
-        G = E.create(players, { minutes });
+      rulesHTML,
+      startNetGame(players, minutes, rules) {
+        G = E.create(players, { minutes, rules });
         G.log.push(`— Ход: ${G.players[0].name}`);
         shownCard = 0;
         showGame(true);

@@ -509,18 +509,24 @@
   class BoardView {
     constructor(parent, opts = {}) {
       this.el = parent;
+      // Phaser меряет внутренний слой без рамки — иначе холст шире места и край кольца обрезается
+      const inner = document.createElement('div');
+      inner.className = 'board-in';
+      parent.appendChild(inner);
       this.onCellTap = opts.onCellTap;
       this.onStep = opts.onStep;
       this.pending = null;
       this.scene = new BoardScene(this);
       this.game = new Phaser.Game({
-        type: Phaser.AUTO, parent, width: CANVAS, height: CANVAS, transparent: true,
+        type: Phaser.AUTO, parent: inner, width: CANVAS, height: CANVAS, transparent: true,
         scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
         // touch.capture: false — Phaser не мешает листать страницу пальцем по полю
         input: { activePointers: 3, touch: { capture: false } },
         banner: false, audio: { noAudio: true },
         scene: this.scene,
       });
+      // поворот экрана, клавиатура, панель браузера — пересчитать размер холста
+      if (window.ResizeObserver) new ResizeObserver(() => this.game.scale && this.game.scale.refresh()).observe(inner);
     }
     setZoomed(z) { this.el.classList.toggle('zoomed', z); }
     update(G, opts) {

@@ -75,7 +75,7 @@
   //  ХОСТ
   // ====================================================================
   const H = {
-    conn: null, seats: [], ids: {}, minutes: 0, ip: '', ips: [], timer: 0, timerKey: '', autoT: 0,
+    conn: null, seats: [], ids: {}, minutes: 0, rules: null, ip: '', ips: [], timer: 0, timerKey: '', autoT: 0,
     linked: false,
   };
 
@@ -170,7 +170,7 @@
     const seats = H.seats.map((s, i) => ({ name: s.name, figure: s.figure, color: T.PLAYER[i], online: s.key === 'host' || seatConn(i) !== null }));
     H.seats.forEach((s, i) => {
       const id = seatConn(i);
-      if (id !== null) hostSend([id], { t: 'lobby', seats, you: i, minutes: H.minutes });
+      if (id !== null) hostSend([id], { t: 'lobby', seats, you: i, minutes: H.minutes, rules: H.rules });
     });
   }
 
@@ -180,7 +180,9 @@
     if (!G) return;
     armTimers(G);
     const left = net.deadline ? Math.max(0, net.deadline - Date.now()) : 0;
-    const gs = JSON.stringify(G), on = JSON.stringify(onlineList()), o = JSON.stringify(opts || {});
+    // тайный аукцион: гостям уходит только «ставка сделана», без сумм
+    const A = G.auction;
+    const gs = JSON.stringify(A && A.sealed ? Object.assign({}, G, { auction: Object.assign({}, A, { bids: Object.fromEntries(Object.keys(A.bids).map(k => [k, A.bids[k] > 0 ? 1 : 0])) }) }) : G), on = JSON.stringify(onlineList()), o = JSON.stringify(opts || {});
     H.seats.forEach((s, i) => {
       const id = seatConn(i);
       if (id === null || s.key === 'host') return;
@@ -220,7 +222,7 @@
 
   function saveNet() {
     const G = net.ui && net.ui.getState();
-    store.set(NET_SAVE, G ? { G, seats: H.seats.map(s => ({ key: s.key, name: s.name, figure: s.figure })), minutes: H.minutes } : null);
+    store.set(NET_SAVE, G ? { G, seats: H.seats.map(s => ({ key: s.key, name: s.name, figure: s.figure })), minutes: H.minutes, rules: H.rules } : null);
   }
 
   function openLobby() {
@@ -241,14 +243,14 @@
     store.set(ME_KEY, { name: h.name, figure: h.figure });
     const players = H.seats.map((s, i) => ({ name: s.name, color: T.PLAYER[i], figure: s.figure }));
     net.inGame = true; net.me = 0; net.online = onlineList();
-    net.ui.startNetGame(players, H.minutes);
+    net.ui.startNetGame(players, H.minutes, H.rules);
     saveNet();
   }
 
   function resumeNet() {
     const s = store.get(NET_SAVE);
     if (!s || !s.G) return false;
-    H.seats = s.seats; H.minutes = s.minutes || 0;
+    H.seats = s.seats; H.minutes = s.minutes || 0; H.rules = s.rules || null;
     hostLink();
     H.ips = hostIps(); H.ip = H.ips[0] || '';
     if (Android && Android.keepAwake) Android.keepAwake(true);
@@ -386,6 +388,7 @@
         ${seats.length < 2 ? '<p class="hint">Ждём, когда подключится хотя бы один игрок.</p>' : ''}</div>`;
       h += `<div class="panel"><h2 class="h2">Ограничение по времени</h2><div class="seg">${[[0, 'Нет'], [30, '30 мин'], [60, '60 мин'], [90, '90 мин']].map(([m, t]) =>
         `<button type="button" role="radio" aria-checked="${m === H.minutes}" data-net="min" data-m="${m}">${t}</button>`).join('')}</div></div>`;
+      h += `<div class="panel"><h2 class="h2">Правила партии</h2><div class="rules">${net.ui.rulesHTML(H.rules, 'data-nrule')}</div></div>`;
       h += `<button type="button" class="btn primary big" data-net="start" ${seats.length < 2 ? 'disabled' : ''}>Начать игру</button>
         <button type="button" class="btn ghost" data-net="back">Назад</button>`;
     } else {
@@ -405,6 +408,7 @@
           <input id="net-name" type="text" maxlength="14" value="${esc(me.name)}" aria-label="Ваше имя">
           ${figurePicker(me.figure, L.seats.filter((_, i) => i !== L.you).map(s => s.figure), me.color)}</div>
           <div class="panel"><h2 class="h2">Игроки · ${L.seats.length} из 6</h2>${seatRows(L.seats, L.you, false)}</div>
+          <div class="panel"><h2 class="h2">Правила партии · выбирает хост</h2><div class="rules">${net.ui.rulesHTML(L.rules, '', true)}</div></div>
           <p class="notice center">Ждём, когда хост начнёт игру${L.minutes ? ` (партия на ${L.minutes} мин)` : ''}.</p>`;
       } else h += '<div class="panel"><p class="notice">Подключаемся…</p></div>';
     }
@@ -416,6 +420,8 @@
   }
 
   function lobbyClick(e) {
+    const r = e.target.closest('[data-nrule]');
+    if (r && mode === 'host') { H.rules = Object.assign(E.normRules(H.rules), { [r.dataset.nrule]: r.dataset.v }); return seatsChanged(); }
     const t = e.target.closest('[data-net]');
     if (!t) return;
     const what = t.dataset.net;

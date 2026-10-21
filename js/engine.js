@@ -26,10 +26,28 @@
     return arr;
   }
 
+  // ---------- правила партии (экран «Новая игра») ----------
+  // auction: open — ставки по кругу, sealed — одна тайная ставка от каждого
+  // money:   open — деньги всех видны, hidden — видны только свои
+  // growth:  flat — цены постоянные, grow — каждые GROW_EVERY кругов +10% (до +50%)
+  // prize:   on — налоги копятся в Приз Ысыаха, off — уходят банку, приза нет
+  const RULE_DEFAULTS = { auction: 'open', money: 'open', growth: 'flat', prize: 'on' };
+  const RULE_VALUES = { auction: ['open', 'sealed'], money: ['open', 'hidden'], growth: ['flat', 'grow'], prize: ['on', 'off'] };
+  const GROW_EVERY = 5, GROW_STEP = 0.1, GROW_MAX = 1.5;
+
+  function normRules(r) {
+    const out = {};
+    for (const k in RULE_DEFAULTS) out[k] = r && RULE_VALUES[k].includes(r[k]) ? r[k] : RULE_DEFAULTS[k];
+    return out;
+  }
+
   // ---------- создание партии ----------
   function create(players, options = {}) {
     const minutes = Number(options.minutes) || 0;
     return migrate({
+      rules: normRules(options.rules),
+      round: 0,                // сколько полных кругов ходов прошло
+      grow: 1,                 // во сколько раз выросли цены
       v: 2,
       players: players.map(p => ({
         name: p.name, color: p.color, figure: p.figure || 'horse',
@@ -65,6 +83,9 @@
   function migrate(s) {
     if (!s) return s;
     s.v = 2;
+    s.rules = normRules(s.rules);
+    s.round = s.round || 0;
+    s.grow = s.grow || 1;
     s.prize = s.prize || 0;
     s.auction = s.auction || null;
     s.auctionQueue = s.auctionQueue || [];
@@ -109,20 +130,30 @@
     return BOARD.reduce((n, c, i) => n + (c.type === type && s.own[i] && s.own[i].owner === p ? 1 : 0), 0);
   }
 
+  // Цены с учётом роста («долгая партия»). Залог и продажа домов — по исходной цене.
+  const up = (s, n) => (s && s.grow > 1 ? Math.round(n * s.grow) : n);
+  const price = (s, i) => up(s, BOARD[i].price);
+  const houseCost = (s, g) => up(s, GROUPS[g].house);
+  const taxOf = (s, i) => up(s, BOARD[i].amount || 0);
+  const prizeOn = s => s.rules.prize !== 'off';
+
+  // Аренда по таблице, без владельца и залога (для справки о клетке)
+  function baseRent(s, i, houses, full) {
+    const c = BOARD[i];
+    return up(s, houses > 0 ? c.rent[houses] : c.rent[0] * (full ? 2 : 1));
+  }
+
   function rentFor(s, i, opts = {}) {
     const c = BOARD[i], o = s.own[i];
     if (!o || o.mortgaged) return 0;
-    if (c.type === 'prop') {
-      if (o.houses > 0) return c.rent[o.houses];
-      return c.rent[0] * (ownsGroup(s, o.owner, c.group) ? 2 : 1);
-    }
+    if (c.type === 'prop') return baseRent(s, i, o.houses, ownsGroup(s, o.owner, c.group));
     if (c.type === 'transport') {
-      return RULES.transportRent[countOwned(s, o.owner, 'transport')] * (opts.mult || 1);
+      return up(s, RULES.transportRent[countOwned(s, o.owner, 'transport')] * (opts.mult || 1));
     }
     if (c.type === 'utility') {
       const sum = opts.diceSum || (s.dice ? s.dice[0] + s.dice[1] : 7);
       const mult = opts.force10 ? 10 : RULES.utilityMult[countOwned(s, o.owner, 'utility')];
-      return sum * mult;
+      return up(s, sum * mult);
     }
     return 0;
   }
@@ -156,8 +187,8 @@
       const o = s.own[k];
       if (o.owner !== p) continue;
       const c = BOARD[k];
-      w += o.mortgaged ? c.price - mortgageValue(k) : c.price;
-      if (c.type === 'prop') w += o.houses * GROUPS[c.group].house;
+      w += o.mortgaged ? price(s, k) - mortgageValue(k) : price(s, k);
+      if (c.type === 'prop') w += o.houses * houseCost(s, c.group);
     }
     const L = s.players[p].loan;
     if (L) w -= L.owe;
@@ -173,7 +204,7 @@
     const cells = groupCells(c.group);
     if (cells.some(j => s.own[j].mortgaged)) return false;
     const min = Math.min(...cells.map(j => s.own[j].houses));
-    return o.houses === min && s.players[p].money >= GROUPS[c.group].house;
+    return o.houses === min && s.players[p].money >= houseCost(s, c.group);
   }
 
   function canSell(s, p, i) {
@@ -262,7 +293,7 @@
     } else if (to === PRIZE) {
       s.prize += amount;
     } else if (to === BANK) {
-      if (prize) s.prize += Math.min(prize, amount);
+      if (prize && prizeOn(s)) s.prize += Math.min(prize, amount);
     } else {
       s.players[to].money += amount;
     }
@@ -359,10 +390,11 @@
         return;
       }
       case 'tax':
-        charge(s, p, PRIZE, c.amount, `${c.name} → в Приз Ысыаха`);
+        if (prizeOn(s)) charge(s, p, PRIZE, taxOf(s, i), `${c.name} → в Приз Ысыаха`);
+        else charge(s, p, BANK, taxOf(s, i), c.name);
         return;
       case 'parking':
-        if (s.prize > 0) {
+        if (prizeOn(s) && s.prize > 0) {
           pl.money += s.prize;
           log(s, `🎉 ${pl.name} получает Приз Ысыаха: ${rub(s.prize)}`);
           s.prize = 0;
@@ -459,8 +491,17 @@
     if (s.endsAt && Date.now() >= s.endsAt) return finishByTime(s);
     let t = s.turn;
     do { t = (t + 1) % s.players.length; } while (s.players[t].bankrupt);
+    if (t <= s.turn) newRound(s);
     s.turn = t; s.phase = 'roll'; s.doubles = 0; s.extra = false; s.dice = null; s.pending = null;
     log(s, `— Ход: ${s.players[t].name}`);
+  }
+
+  // Прошёл круг ходов. В «долгой партии» каждые GROW_EVERY кругов цены растут
+  function newRound(s) {
+    s.round++;
+    if (s.rules.growth !== 'grow' || s.round % GROW_EVERY || s.grow >= GROW_MAX) return;
+    s.grow = Math.min(GROW_MAX, Math.round((s.grow + GROW_STEP) * 100) / 100);
+    log(s, `📈 Цены выросли: теперь +${Math.round((s.grow - 1) * 100)}% к покупке, аренде, домам и налогам`);
   }
 
   function finishByTime(s) {
@@ -472,16 +513,38 @@
 
   // ---------- аукцион ----------
   function startAuction(s, cell) {
-    const start = Math.max(RULES.bidStep, Math.floor(BOARD[cell].price * RULES.auctionStart));
+    const start = Math.max(RULES.bidStep, Math.floor(price(s, cell) * RULES.auctionStart));
     s.auction = { cell, start, price: 0, leader: null, bidders: alive(s), at: null };
     s.phase = 'auction'; s.pending = null;
+    if (s.rules.auction === 'sealed') {
+      // тайный: каждый по кругу один раз пишет ставку, потом все открываются
+      const n = s.players.length, A = s.auction;
+      A.sealed = true; A.bids = {};
+      A.bidders = A.bidders
+        .filter(i => s.players[i].money >= start)
+        .sort((a, b) => ((a - s.turn - 1 + n) % n) - ((b - s.turn - 1 + n) % n));
+      log(s, `🔨 Тайный аукцион: ${BOARD[cell].name}, ставки от ${rub(start)}`);
+      return nextSealed(s);
+    }
     log(s, `🔨 Аукцион: ${BOARD[cell].name}, торги с ${rub(start)}`);
     advanceAuction(s, s.turn);
   }
 
+  // Тайный аукцион: следующий, кто ещё не ставил, или вскрываем ставки
+  function nextSealed(s) {
+    const A = s.auction;
+    const left = A.bidders.filter(i => A.bids[i] === undefined);
+    if (left.length) { A.at = left[0]; return; }
+    let best = null;
+    A.bidders.forEach(i => { if (A.bids[i] > 0 && (best === null || A.bids[i] > A.bids[best])) best = i; });
+    if (A.bidders.length) log(s, `🔨 Ставки: ${A.bidders.map(i => `${s.players[i].name} — ${A.bids[i] > 0 ? rub(A.bids[i]) : 'пас'}`).join(', ')}`);
+    if (best !== null) { A.leader = best; A.price = A.bids[best]; }
+    finishAuction(s);
+  }
+
   function minBid(s) {
     const A = s.auction;
-    return A.leader === null ? A.start : A.price + RULES.bidStep;
+    return A.sealed || A.leader === null ? A.start : A.price + RULES.bidStep;
   }
 
   // Передать ставку следующему по кругу. Кому не хватает денег — выбывает
@@ -649,12 +712,12 @@
 
       case 'buy': {
         if (s.phase !== 'buy') return err('Нечего покупать');
-        const i = s.pending.cell, c = BOARD[i];
-        if (pl.money < c.price) return err('Не хватает денег');
-        pl.money -= c.price;
+        const i = s.pending.cell, c = BOARD[i], cost = price(s, i);
+        if (pl.money < cost) return err('Не хватает денег');
+        pl.money -= cost;
         s.own[i] = { owner: p, houses: 0, mortgaged: false };
         s.pending = null; s.phase = 'moving';
-        log(s, `🏠 ${pl.name} покупает ${c.name} за ${rub(c.price)}`);
+        log(s, `🏠 ${pl.name} покупает ${c.name} за ${rub(cost)}`);
         settle(s);
         return ok();
       }
@@ -672,6 +735,12 @@
         const A = s.auction, amount = int(a.amount);
         if (amount < minBid(s)) return err(`Ставка не меньше ${rub(minBid(s))}`);
         if (amount > pl.money) return err('Не хватает денег');
+        if (A.sealed) {
+          A.bids[p] = amount;
+          log(s, `${pl.name} делает тайную ставку`);
+          nextSealed(s);
+          return ok();
+        }
         A.price = amount; A.leader = p;
         log(s, `${pl.name}: ставка ${rub(amount)}`);
         advanceAuction(s, p);
@@ -681,6 +750,12 @@
       case 'pass': {
         if (s.phase !== 'auction') return err('Аукциона нет');
         const A = s.auction;
+        if (A.sealed) {
+          A.bids[p] = 0;
+          log(s, `${pl.name}: пас`);
+          nextSealed(s);
+          return ok();
+        }
         A.bidders = A.bidders.filter(i => i !== p);
         log(s, `${pl.name}: пас`);
         advanceAuction(s, p);
@@ -690,7 +765,7 @@
       case 'build': {
         if (s.phase !== 'roll' && s.phase !== 'end') return err('Сейчас строить нельзя');
         if (!canBuild(s, p, a.cell)) return err('Здесь строить нельзя');
-        const c = BOARD[a.cell], cost = GROUPS[c.group].house;
+        const c = BOARD[a.cell], cost = houseCost(s, c.group);
         pl.money -= cost;
         s.own[a.cell].houses++;
         const h = s.own[a.cell].houses;
@@ -835,6 +910,7 @@
     create, migrate, act, actor, rentFor, netWorth, canBuild, canSell, ownsGroup, groupCells, groupHasHouses,
     liquidValue, sellValue, mortgageValue, mortgageFee, unmortgageCost, canMortgage, canUnmortgage,
     canTradeCell, minBid, describeSide, rub, BANK, PRIZE,
+    price, houseCost, taxOf, baseRent, up, normRules, RULE_DEFAULTS, GROW_EVERY,
     setRandom(fn) { rand = fn; },
   };
   root.BAAI = root.BAAI || {};
