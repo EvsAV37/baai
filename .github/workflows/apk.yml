@@ -1,0 +1,48 @@
+# Собирает APK «Баай» при каждом изменении в main и выкладывает его в Releases.
+# Скачать последнюю версию: https://github.com/EvsAV37/baai/releases/latest/download/baai.apk
+name: APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Собрать APK
+        run: gradle -p android assembleRelease --no-daemon --stacktrace
+
+      - name: Переименовать
+        run: cp android/app/build/outputs/apk/release/app-release.apk baai.apk
+
+      - name: Выложить в Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: Баай · сборка ${{ github.run_number }}
+          make_latest: true
+          body: |
+            Установите baai.apk на телефон хоста (того, кто включает точку доступа).
+            Остальным игрокам ничего ставить не нужно: они сканируют QR-код из игры.
+            Изменения: ${{ github.event.head_commit.message }}
+          files: baai.apk

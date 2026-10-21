@@ -331,3 +331,30 @@ body {
 .asset.loan .info span { color: var(--coral); }
 .sheet > * { flex-shrink: 0; }
 .chip i { box-shadow: 0 0 0 1.5px #fff; }
+
+/* ---------- игра по Wi-Fi ---------- */
+.net-box .btn { width: 100%; margin-top: 10px; }
+.qr-panel { text-align: center; }
+.qr { background: #fff; border-radius: 12px; padding: 6px; width: min(260px, 72vw); margin: 12px auto 6px; border: 2px solid var(--ink); }
+.qr svg { display: block; width: 100%; height: auto; }
+.addr { font-size: 15px; font-weight: 700; word-break: break-all; margin: 4px 0 6px; }
+.qr-panel .btn { margin-top: 10px; }
+.ips { margin-top: 8px; flex-wrap: wrap; }
+#lobby input#net-name { width: 100%; box-sizing: border-box; font: inherit; font-size: 18px; padding: 10px 12px; border: 2px solid var(--ink); border-radius: 10px; background: var(--paper); color: var(--ink); }
+.figs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-top: 10px; }
+.figs button { background: var(--snow); border: 2px solid transparent; border-radius: 12px; padding: 4px; display: flex; justify-content: center; cursor: pointer; }
+.figs button[aria-checked="true"] { border-color: var(--ink); background: var(--paper); }
+.figs button:disabled { opacity: .25; cursor: default; }
+.figs svg { width: 100%; max-width: 44px; height: auto; }
+.seat { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); }
+.seat:first-of-type { border-top: 0; }
+.seat .nm { flex: 1; font-size: 18px; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.seat .nm em, .status .who em.you { font-style: normal; font-weight: 400; font-size: 13px; color: var(--muted); margin-left: 4px; }
+.status .who em.you { color: var(--coral); font-family: var(--f-body); font-weight: 700; }
+.seat .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--silver); flex: none; }
+.seat .dot.on { background: var(--larch); }
+.claims { display: flex; flex-direction: column; gap: 8px; }
+.claims .btn { display: flex; align-items: center; gap: 10px; justify-content: flex-start; }
+.notice.wait { text-align: center; }
+.sub.left, .notice .left { font-weight: 700; color: var(--coral); margin-top: 6px; }
+.net-bar { position: fixed; left: 0; right: 0; top: 0; z-index: 60; background: var(--coral); color: #fff; text-align: center; font-weight: 700; padding: calc(env(safe-area-inset-top) + 8px) 12px 8px; }

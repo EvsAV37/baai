@@ -6,7 +6,7 @@
 <title>Баай</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="theme-color" content="#eef1f2">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya+SC:wght@700;800&family=PT+Sans+Narrow:wght@400;700&display=swap">
+<link rel="stylesheet" href="css/fonts.css">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -38,9 +38,19 @@
       <p class="hint">Когда время выйдет, побеждает самый богатый: деньги плюс имущество.</p>
     </div>
 
-    <button id="btn-start" class="btn primary big" type="button">Начать игру</button>
+    <button id="btn-start" class="btn primary big" type="button">Начать игру на этом телефоне</button>
+
+    <div id="net-box" class="panel net-box" hidden>
+      <h2 class="h2">Игра с разных телефонов</h2>
+      <p class="hint">По Wi-Fi точке доступа этого телефона. Интернет не нужен, друзьям ничего ставить не надо.</p>
+      <button id="btn-net" class="btn primary" type="button">Создать игру по Wi-Fi</button>
+      <button id="btn-net-resume" class="btn" type="button" hidden>Продолжить сетевую партию</button>
+    </div>
     <p class="copy">© 2026 Евсеев А.В.</p>
   </section>
+
+  <!-- Комната: подключение по QR -->
+  <section id="lobby" class="screen" hidden></section>
 
   <!-- Экран игры -->
   <section id="game" class="screen" hidden>
@@ -80,6 +90,7 @@
   <div id="sheet-bg" class="sheet-bg" hidden></div>
   <div id="sheet" class="sheet" role="dialog" aria-modal="true" hidden></div>
   <div id="toast" class="toast" role="status" hidden></div>
+  <div id="net-bar" class="net-bar" role="status" hidden></div>
 </div>
 <!--/APP-->
 <script src="vendor/phaser.min.js"></script>
@@ -87,6 +98,8 @@
 <script src="js/theme.js"></script>
 <script src="js/engine.js"></script>
 <script src="js/board.js"></script>
+<script src="vendor/qrcode.js"></script>
+<script src="js/net.js"></script>
 <script src="js/ui.js"></script>
 </body>
 </html>
