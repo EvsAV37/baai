@@ -46,7 +46,7 @@ async function humanStep(p, onlyMe) {
     if (only && a !== n.me) return null;
     const sheet = document.getElementById('sheet');
     if (!sheet.hidden) { const c = sheet.querySelector('[data-act="close"]'); if (c) { c.click(); return 'close'; } }
-    const btns = [...document.querySelectorAll('#actions [data-act]')].filter(b => !b.disabled);
+    const btns = [...document.querySelectorAll('#actions [data-act]')].filter(b => !b.disabled && !b.classList.contains('off'));
     const pick = acts => btns.find(b => acts.includes(b.dataset.act));
     let b = null;
     if (G.phase === 'auction') b = pick(['pass']);

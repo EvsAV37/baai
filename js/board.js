@@ -179,10 +179,13 @@
         this.layer = this.add.graphics().setDepth(2);
         this.hl = this.add.graphics().setDepth(3);
         this.marks = this.add.graphics().setDepth(3.5);
+        this.ring = this.add.graphics().setDepth(30);
+        this.ringWho = -1;
+        this.tweens.add({ targets: this.ring, alpha: { from: 1, to: 0.35 }, duration: 520, yoyo: true, repeat: -1 });
         this.tweens.add({ targets: this.marks, alpha: { from: 1, to: 0.25 }, duration: 520, yoyo: true, repeat: -1 });
         this.tweens.add({ targets: this.hl, alpha: { from: 1, to: 0.35 }, duration: 700, yoyo: true, repeat: -1 });
         this.setupInput();
-        if (this.view.pendingMark) { this.mark(this.view.pendingMark); this.view.pendingMark = null; }
+        if (this.view.pendingMark) { this.mark(this.view.pendingMark.cells, this.view.pendingMark.who); this.view.pendingMark = null; }
         if (this.view.pending) { const p = this.view.pending; this.view.pending = null; this.apply(p.G, p.opts); }
       });
     }
@@ -191,6 +194,7 @@
       const cam = this.cameras.main;
       const r = -cam.rotation;
       this.tokens.forEach(t => { if (t) t.rotation = r; });
+      if (this.ring) this.drawRing();
       const z = cam.zoom > BASE * 1.03;
       if (z !== this.zoomed) { this.zoomed = z; this.view.setZoomed(z); }
     }
@@ -304,13 +308,27 @@
       });
     }
 
-    // золотая рамка вокруг клеток, где можно строить
-    mark(cells) {
+    // мигающая рамка вокруг клеток: число — золотая (где строить), {cell, color} — своим цветом;
+    // who — фишка игрока, которую обвести кольцом (-1 — никого)
+    mark(cells, who) {
       const g = this.marks; g.clear();
-      (cells || []).forEach(i => {
-        g.lineStyle(6, hex(C.gold), 1); this.sector(g, i); g.strokePath();
-        g.fillStyle(hex(C.gold), 0.22); this.sector(g, i); g.fillPath();
+      (cells || []).forEach(m => {
+        const i = typeof m === 'number' ? m : m.cell, col = hex(typeof m === 'number' ? C.gold : m.color);
+        g.lineStyle(7, col, 1); this.sector(g, i); g.strokePath();
+        g.fillStyle(col, 0.24); this.sector(g, i); g.fillPath();
       });
+      this.ringWho = who === undefined ? -1 : who;
+    }
+    // кольцо вокруг фишки (рисуется каждый кадр — фишка может двигаться)
+    drawRing() {
+      const g = this.ring; g.clear();
+      const t = this.ringWho >= 0 && this.tokens[this.ringWho];
+      if (!t || !t.visible) return;
+      const pl = this.view.players && this.view.players[this.ringWho];
+      const col = hex(pl ? pl.color : C.coral);
+      g.lineStyle(6, 0xffffff, 1); g.strokeCircle(t.x, t.y, TOK * 0.62);
+      g.lineStyle(3.5, col, 1); g.strokeCircle(t.x, t.y, TOK * 0.62);
+      g.lineStyle(2, col, 0.55); g.strokeCircle(t.x, t.y, TOK * 0.86);
     }
 
     // Фигура на кольце: точки [u, v] — u вдоль кольца, v от центра наружу; центр на угле c, радиус r
@@ -607,6 +625,7 @@
 
     // ----- применить новое состояние партии -----
     async apply(G, opts = {}) {
+      this.view.players = G.players;
       if (this.moving) {
         // не теряем то, что ждало окончания хода (карточка, звуки, монеты)
         const prev = this.queued && this.queued.opts.onSettled;
@@ -700,7 +719,7 @@
       el.addEventListener('gesturestart', e => e.preventDefault());
     }
     // Подсветить клетки (где можно строить); пустой список — убрать
-    mark(cells) { if (this.scene.layer) this.scene.mark(cells); else this.pendingMark = cells; }
+    mark(cells, who) { if (this.scene.layer) this.scene.mark(cells, who); else this.pendingMark = { cells, who }; }
     setZoomed(z) { this.el.classList.toggle('zoomed', z); }
     update(G, opts) {
       const s = this.scene;

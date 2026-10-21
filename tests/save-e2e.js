@@ -26,7 +26,7 @@ async function toBuy(page) {
       const sheet = document.getElementById('sheet');
       if (!sheet.hidden) { const c = sheet.querySelector('[data-act="close"]'); if (c) { c.click(); return; } }
       const G = BAAI.net.ui.getState();
-      const btns = [...document.querySelectorAll('#actions [data-act]')].filter(b => !b.disabled);
+      const btns = [...document.querySelectorAll('#actions [data-act]')].filter(b => !b.disabled && !b.classList.contains('off'));
       const pick = acts => btns.find(b => acts.includes(b.dataset.act));
       const b = G.phase === 'auction' ? pick(['pass']) : G.phase === 'offer' ? pick(['reject'])
         : pick(['roll', 'payJail', 'payDebt', 'endTurn', 'bankrupt']) || btns[0];
@@ -91,7 +91,7 @@ async function newGameFromMenu(page) {
       if (s.turn !== before.turn && s.phase === 'roll') break;
       if (s.phase === 'roll') { await page.click('#actions [data-act="roll"]'); await sleep(900); continue; }
       await page.evaluate(() => { const sh = document.getElementById('sheet'); if (!sh.hidden) { const c = sh.querySelector('[data-act="close"]'); if (c) c.click(); return; }
-        const b = [...document.querySelectorAll('#actions [data-act]')].find(b => !b.disabled && ['endTurn', 'pass', 'reject', 'payDebt', 'buy', 'decline', 'bankrupt'].includes(b.dataset.act)); if (b) b.click(); });
+        const b = [...document.querySelectorAll('#actions [data-act]')].find(b => !b.disabled && !b.classList.contains('off') && ['endTurn', 'pass', 'reject', 'payDebt', 'buy', 'decline', 'bankrupt'].includes(b.dataset.act)); if (b) b.click(); });
       await sleep(150);
     }
     await page.evaluate(() => { const sh = document.getElementById('sheet'); if (!sh.hidden) { const c = sh.querySelector('[data-act="close"]'); if (c) c.click(); } });

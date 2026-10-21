@@ -382,8 +382,27 @@
     tick();
   }
 
-  function btn(label, action, cls = '', disabled = false, extra = '') {
-    return `<button type="button" class="btn ${cls}" data-act="${action}" ${extra} ${disabled ? 'disabled' : ''}>${label}</button>`;
+  // Неактивная кнопка не молчит: нажатие объясняет, почему нельзя (why)
+  function btn(label, action, cls = '', disabled = false, extra = '', why = '') {
+    const off = disabled ? ` aria-disabled="true" data-why="${esc(why || 'Сейчас это сделать нельзя')}"` : '';
+    return `<button type="button" class="btn ${cls}${disabled ? ' off' : ''}" data-act="${action}" ${extra}${off}>${label}</button>`;
+  }
+  // Клетка с цветом группы и значком — чтобы сразу найти её на круге
+  function cellTag(i) {
+    const c = BOARD[i], o = G.own[i];
+    return `<span class="ctag" style="--gc:${cellColor(c)}"><span class="sw">${icon(cellIcon(i), '#ffffff', 2.4)}</span><b>${esc(c.name)}</b>${o && o.mortgaged ? '<em>❄ в залоге</em>' : ''}</span>`;
+  }
+  // Игрок с его фишкой и цветом
+  function whoTag(p) {
+    const pl = G.players[p];
+    return `<span class="whotag" style="--pc:${pl.color}">${token(pl, 26)}<b>${esc(pl.name)}</b></span>`;
+  }
+  // Что лежит на одной стороне сделки: клетки, деньги, карты
+  function sideHTML(sd) {
+    const parts = sd.cells.map(cellTag);
+    if (sd.money) parts.push(`<span class="ctag money"><b>${rub(sd.money)}</b></span>`);
+    if (sd.cards) parts.push(`<span class="ctag money"><b>«Попутный вездеход»${sd.cards > 1 ? ' ×' + sd.cards : ''}</b></span>`);
+    return `<div class="tags">${parts.length ? parts.join('') : '<span class="sub">ничего</span>'}</div>`;
   }
 
   // ----- стройка -----
@@ -421,12 +440,24 @@
   let glowBuild = false;          // подсветить кнопку «Строить» (после «Группа собрана!»)
   let buildMode = false;          // режим «Строить»: на поле подсвечены клетки, нажатие ставит дом
   const buildHinted = new Set();  // кому уже показали «Группа собрана»
+  const MARK_GIVE = '#d23b2f', MARK_GET = '#22a45a';
   function syncMarks() {
     if (!board) return;
     const p = G && me();
     const cells = G && buildMode ? buildable(p) : [];
     if (buildMode && !cells.length) buildMode = false;
-    board.mark(cells);
+    if (buildMode || !G) { board.mark(cells, -1); return; }
+    // предложение: красная рамка — что отдаёте, зелёная — что получаете; фишка второго — в кольце
+    const o = G.phase === 'offer' && G.offer;
+    if (o) {
+      const iFrom = p === o.from;
+      const red = o.kind === 'trade' ? (iFrom ? o.give.cells : o.get.cells) : [];
+      const green = o.kind === 'trade' ? (iFrom ? o.get.cells : o.give.cells) : [];
+      board.mark(red.map(cell => ({ cell, color: MARK_GIVE })).concat(green.map(cell => ({ cell, color: MARK_GET }))), iFrom ? o.to : o.from);
+      return;
+    }
+    if (G.phase === 'auction' && G.auction) { board.mark([{ cell: G.auction.cell, color: T.C.coral }], -1); return; }
+    board.mark([], -1);
   }
   function onBoardTap(i) {
     if (buildMode && buildable(me()).includes(i)) { send('build', { cell: i }); return; }
@@ -441,7 +472,7 @@
     if (canUndo()) parts.push(btn('<span class="u" aria-hidden="true">↶</span>Отменить', 'undo', 'sm ic undo', false, `aria-label="Отменить: ${esc(undo[undo.length - 1].label)}"`));
     if (buildable(G.turn).length) parts.push(btn(`${icon('house', 'currentColor', 2.2)}Строить`, 'buildMode', `sm ic gold${glowBuild ? ' glow' : ''}`));
     if (canTrade) parts.push(btn(`${icon('swap', 'currentColor', 2.2)}Обмен`, 'tradeOpen', 'sm ic'));
-    if (canLoan) parts.push(btn(`${icon('card', 'currentColor', 2.2)}${pl.loan ? 'Кредит · ' + rub(pl.loan.owe) : 'Кредит'}`, 'loanOpen', 'sm ic'));
+    if (canLoan) parts.push(btn(`${icon('card', 'currentColor', 2.2)}${pl.loan ? 'К возврату ' + rub(pl.loan.owe) : 'Кредит'}`, 'loanOpen', 'sm ic'));
     return parts.length ? `<div class="act-row side">${parts.join('')}</div>` : '';
   }
 
@@ -490,14 +521,14 @@
     const o = G.offer, from = G.players[o.from], to = G.players[o.to];
     let body;
     if (o.kind === 'trade') {
-      body = `<p><b>${esc(from.name)}</b> предлагает обмен.</p>
-        <div class="swap"><div><span class="sub">Вы получаете</span><b>${esc(E.describeSide(G, o.give))}</b></div>
-        <div><span class="sub">Вы отдаёте</span><b>${esc(E.describeSide(G, o.get))}</b></div></div>`;
+      body = `<p>${whoTag(o.from)} предлагает обмен.</p>
+        <div class="swap"><div class="get"><span class="sub">Вы получаете — зелёная рамка на поле</span>${sideHTML(o.give)}</div>
+        <div class="give"><span class="sub">Вы отдаёте — красная рамка на поле</span>${sideHTML(o.get)}</div></div>`;
       const mort = o.give.cells.filter(i => G.own[i].mortgaged);
       if (mort.length) body += `<p class="sub">Заложенные клетки: ${mort.map(i => esc(BOARD[i].name)).join(', ')}. За них вы заплатите банку 10% залога: ${rub(mort.reduce((n, i) => n + E.mortgageFee(i), 0))}.</p>`;
     } else {
       const owe = Math.round(o.amount * (1 + o.rate / 100));
-      body = `<p><b>${esc(from.name)}</b> просит в долг <b>${rub(o.amount)}</b> под ${o.rate}%.</p>
+      body = `<p>${whoTag(o.from)} просит в долг <b>${rub(o.amount)}</b> под ${o.rate}%.</p>
         <p>Вернёт вам <b>${rub(owe)}</b> через ${laps(o.laps)}. Если не сможет — получите его имущество.</p>
         <p class="sub">У вас ${rub(to.money)}.</p>`;
     }
@@ -511,7 +542,14 @@
     if (G.phase === 'roles') return `<div class="notice wait"><b>${esc(pl.name)}</b> выбирает тайную роль.</div>`;
     if (G.phase === 'offer') {
       const o = G.offer;
-      return `<div class="notice">${esc(pl.name)} ${o.kind === 'trade' ? `решает, меняться ли с игроком ${esc(G.players[o.from].name)}` : `решает, дать ли в долг игроку ${esc(G.players[o.from].name)}`}.${leftHTML()}</div>`;
+      if (o.from === me()) {
+        const what = o.kind === 'trade'
+          ? `<p>Вы предложили обмен: ${whoTag(o.to)}</p><div class="swap"><div class="give"><span class="sub">Вы отдаёте — красная рамка на поле</span>${sideHTML(o.give)}</div>
+             <div class="get"><span class="sub">Вы получаете — зелёная рамка на поле</span>${sideHTML(o.get)}</div></div>`
+          : `<p>Вы попросили в долг <b>${rub(o.amount)}</b> под ${o.rate}%: ${whoTag(o.to)}</p>`;
+        return `<div class="notice wait-me">${what}<p class="pending">Ждём ответа…</p>${leftHTML()}</div>`;
+      }
+      return `<div class="notice">${whoTag(o.to)} ${o.kind === 'trade' ? 'решает, меняться ли с игроком' : 'решает, дать ли в долг игроку'} ${whoTag(o.from)}.${leftHTML()}</div>`;
     }
     const off = NET.online && !NET.online[who] ? ' Игрок сейчас без связи — ждём, пока переподключится.' : '';
     const out = netGame() && G.players[NET.me] && G.players[NET.me].bankrupt ? '<p class="sub">Вы выбыли из игры, но можете смотреть до конца.</p>' : '';
@@ -556,7 +594,7 @@
       return;
     } else if (G.phase === 'roll' && pl.inJail) {
       h += `<div class="notice">Вы в зимовье, снаружи пурга. Попытка ${pl.jailTries + 1} из ${RULES.maxJailTries}: выбросьте дубль — пурга стихнет. Или вызовите вездеход за ${RULES.jailFine} ₽.</div>`;
-      h += `<div class="act-row">${btn('Бросить на дубль', 'roll', 'primary')}${btn(`Вездеход · ${RULES.jailFine} ₽`, 'payJail', '', pl.money < RULES.jailFine)}${pl.freeCards.length ? btn('Попутный вездеход', 'useCard') : ''}</div>`;
+      h += `<div class="act-row">${btn('Бросить на дубль', 'roll', 'primary')}${btn(`Вездеход · ${RULES.jailFine} ₽`, 'payJail', '', pl.money < RULES.jailFine, '', `Не хватает денег: вездеход стоит ${rub(RULES.jailFine)}`)}${pl.freeCards.length ? btn('Попутный вездеход', 'useCard') : ''}</div>`;
     } else if (G.phase === 'roll') {
       h += `<div class="act-row">${btn(G.extra ? 'Бросить ещё раз' : 'Бросить кубики', 'roll', 'primary big')}</div>`;
     } else if (G.phase === 'buy') {
@@ -565,7 +603,7 @@
       const short = pl.money < cost || hunter;
       if (hunter) h += `<div class="notice">Охотник не покупает транспорт — клетка уйдёт на аукцион.</div>`;
       if (short && !hunter) h += `<div class="notice bad">На ${esc(c.name)} не хватает денег. Можно заложить клетку или взять кредит. Если не купите, клетка уйдёт на аукцион.</div>`;
-      h += `<div class="act-row">${btn(`Купить ${rub(cost)}`, 'buy', 'primary big', short)}${btn('На аукцион', 'decline', 'big')}</div>`;
+      h += `<div class="act-row">${btn(`Купить ${rub(cost)}`, 'buy', 'primary big', short, '', hunter ? 'Охотник не покупает транспорт' : `Не хватает ${rub(cost - pl.money)}`)}${btn('На аукцион', 'decline', 'big')}</div>`;
       h += `<div class="act-row">${btn('Подробнее о клетке', 'info', 'ghost', false, `data-cell="${G.pending.cell}"`)}</div>`;
     } else if (G.phase === 'debt') {
       const d = G.pending;
@@ -574,7 +612,7 @@
       h += `<div class="notice bad">Нужно заплатить <b>${rub(d.amount)}</b> (${esc(d.reason)}). У вас ${rub(pl.money)}.
         ${!can && liquid >= d.amount ? ' Продайте дома или заложите клетки в разделе «Имущество».' : ''}
         ${liquid < d.amount ? ' Даже с продажей домов и залогом не хватает.' : ''}</div>`;
-      h += `<div class="act-row">${btn('Заплатить', 'payDebt', 'primary', !can)}${btn('Объявить банкротство', 'bankrupt', 'danger', can)}</div>`;
+      h += `<div class="act-row">${btn('Заплатить', 'payDebt', 'primary', !can, '', `Не хватает ${rub(d.amount - pl.money)}. Продайте дома, заложите клетки или возьмите кредит.`)}${btn('Объявить банкротство', 'bankrupt', 'danger', can, '', 'Денег хватает — банкротство не нужно')}</div>`;
     } else if (G.phase === 'end') {
       h += `<div class="act-row">${btn('Завершить ход', 'endTurn', 'dark big')}</div>`;
     }
@@ -681,7 +719,7 @@
       const tags = [];
       if (p.bankrupt) tags.push('банкрот');
       else if (p.inJail) tags.push('в зимовье');
-      if (p.loan) tags.push(`долг ${rub(p.loan.owe)}`);
+      if (p.loan) tags.push(`к возврату ${rub(p.loan.owe)}`);
       if (p.freeCards.length) tags.push(`вездеход ×${p.freeCards.length}`);
       if (netGame() && i === NET.me) tags.unshift('вы');
       if (p.bot) tags.unshift('бот');
@@ -707,7 +745,7 @@
 
   function loanLine(L) {
     const from = L.from === BANK ? 'банку' : G.players[L.from].name;
-    return `Вернуть ${rub(L.owe)} → ${esc(from)}, ${L.laps > 0 ? 'через ' + laps(L.laps) : 'сейчас'}`;
+    return `К возврату ${rub(L.owe)} → ${esc(from)}, ${L.laps > 0 ? 'через ' + laps(L.laps) : 'сейчас'}`;
   }
 
   function renderAssets() {
@@ -739,7 +777,7 @@
           if (E.canSell(G, p, i)) btns += `<button type="button" class="btn sm" data-act="sell" data-cell="${i}">${sellWord(i)}</button>`;
           if (E.canBuild(G, p, i) && calm) btns += `<button type="button" class="btn sm gold" data-act="build" data-cell="${i}">${houseWord(i, p)}</button>`;
         } else if (o.mortgaged) {
-          if (calm) btns = `<button type="button" class="btn sm" data-act="unmortgage" data-cell="${i}" ${E.canUnmortgage(G, p, i) ? '' : 'disabled'}>Выкуп</button>`;
+          if (calm) btns = btn('Выкуп', 'unmortgage', 'sm', !E.canUnmortgage(G, p, i), `data-cell="${i}"`, `Не хватает денег: выкуп ${rub(E.unmortgageCost(i))}`);
         } else {
           if (calm && E.canBuild(G, p, i)) btns += `<button type="button" class="btn sm gold" data-act="build" data-cell="${i}">${houseWord(i, p)}</button>`;
           btns += `<button type="button" class="btn sm" data-act="mortgage" data-cell="${i}" aria-label="Заложить за ${E.mortgageValue(i)} ₽">Залог</button>`;
@@ -751,8 +789,17 @@
     $('assets').innerHTML = h;
   }
 
+  // Журнал: названия клеток — с цветом группы, как на поле
+  let logRe = null;
+  const logCells = {};
   function renderLog() {
-    $('log').innerHTML = G.log.slice(-30).reverse().map(t => `<li>${esc(t)}</li>`).join('');
+    if (!logRe) {
+      BOARD.forEach((c, i) => { if (['prop', 'transport', 'utility'].includes(c.type)) logCells[esc(c.name)] = i; });
+      const names = Object.keys(logCells).sort((x, y) => y.length - x.length).map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      logRe = new RegExp(names.join('|'), 'g');
+    }
+    $('log').innerHTML = G.log.slice(-30).reverse().map(t => `<li>${esc(t).replace(logRe, n =>
+      `<span class="lc" style="--gc:${cellColor(BOARD[logCells[n]])}">${n}</span>`)}</li>`).join('');
   }
 
   function renderTimer() {
@@ -1027,7 +1074,7 @@
       h += `<div class="act-row">${btn(`Выкупить · ${rub(E.unmortgageCost(i))}`, 'unmortgage', 'primary', !E.canUnmortgage(G, tp, i), `data-cell="${i}"`)}</div>`;
     } else if (mine && !o.mortgaged && ['roll', 'end', 'debt', 'buy'].includes(G.phase)) {
       const blocked = c.type === 'prop' && E.groupHasHouses(G, c.group);
-      h += `<div class="act-row">${btn(`Заложить · +${rub(E.mortgageValue(i))}`, 'mortgage', '', blocked, `data-cell="${i}"`)}</div>`;
+      h += `<div class="act-row">${btn(`Заложить · +${rub(E.mortgageValue(i))}`, 'mortgage', '', blocked, `data-cell="${i}"`, 'Сначала продайте дома в этой группе')}</div>`;
       if (blocked) h += '<p class="sub">Чтобы заложить, сначала продайте дома в этой группе.</p>';
     }
     h += btn('Закрыть', 'close', 'ghost');
@@ -1090,10 +1137,11 @@
       h += `<table class="rent"><tbody>
         <tr><td>Кредитор</td><td>${L.from === BANK ? 'Банк' : esc(G.players[L.from].name)}</td></tr>
         <tr><td>Взято</td><td>${rub(L.principal)}</td></tr>
-        <tr><td>Вернуть</td><td>${rub(L.owe)}</td></tr>
+        <tr><td>К возврату</td><td>${rub(L.owe)}</td></tr>
         <tr><td>Срок</td><td>${L.laps > 0 ? 'через ' + laps(L.laps) : 'сейчас'}</td></tr></tbody></table>
         <p class="sub">Долг спишется сам, когда пройдёте Старт нужное число раз. Новый кредит можно взять после возврата.</p>
-        ${btn(`Вернуть досрочно · ${rub(L.owe)}`, 'loanRepay', 'primary big', !calm || pl.money < L.owe)}
+        ${btn(`Вернуть досрочно · ${rub(L.owe)}`, 'loanRepay', 'primary big', !calm || pl.money < L.owe, '',
+          !myMove() ? 'Сейчас не ваш ход' : !calm ? 'Вернуть досрочно можно в начале или в конце своего хода' : `Не хватает ${rub(L.owe - pl.money)}`)}
         ${btn('Закрыть', 'close', 'ghost')}`;
       openKind('loan', h);
       return;
@@ -1123,7 +1171,7 @@
     h += `<h4>Сумма</h4>${amountRow}
       <div class="loan-sum"><div><span>Вернуть через ${laps(lp)}</span><b>${rub(owe)}</b></div>
       <p class="sub">${loan.from === BANK ? `Ставка ${rate}%. ` : ''}Если к сроку денег не хватит, придётся продать дома, заложить клетки или объявить банкротство. ${note}</p></div>
-      ${btn(loan.from === BANK ? 'Взять кредит' : 'Попросить в долг', 'lTake', 'primary big', loan.from !== BANK && G.players[loan.from].money < RULES.loanStep)}
+      ${btn(loan.from === BANK ? 'Взять кредит' : 'Попросить в долг', 'lTake', 'primary big', loan.from !== BANK && G.players[loan.from].money < RULES.loanStep, '', loan.from !== BANK ? `У игрока ${G.players[loan.from].name} нет денег в долг` : '')}
       ${btn('Отмена', 'close', 'ghost')}`;
     openKind('loan', h);
   }
@@ -1230,21 +1278,84 @@
   }
 
   let toastT = 0;
-  function toast(t) {
+  // kind: 'ok' — получилось, 'bad' — нельзя или ошибка
+  function toast(t, kind) {
     const el = $('toast');
     el.textContent = t; el.hidden = false;
+    el.className = 'toast' + (kind ? ' ' + kind : '');
+    el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
     clearTimeout(toastT);
-    toastT = setTimeout(() => { el.hidden = true; }, 2500);
+    toastT = setTimeout(() => { el.hidden = true; }, kind === 'bad' ? 3500 : 3000);
   }
 
   // ---------- действия ----------
+  // Каждое нажатие даёт ответ: результат, «ждём ответа» или причину, почему нельзя.
+  let pending = null, pendT = 0;
+  let lastBtn = null;
+  function setBusy(on) {
+    document.body.classList.toggle('busy', on);
+    if (on && lastBtn && document.body.contains(lastBtn)) lastBtn.classList.add('wait');
+    if (on) lastBtn = null;
+    if (!on) document.querySelectorAll('.btn.wait').forEach(b => b.classList.remove('wait'));
+  }
+  function noteBefore(a) {
+    const pl = G.players[a.player];
+    return { money: G.players.map(x => x.money), loan: pl && pl.loan ? Object.assign({}, pl.loan) : null,
+      cell: G.pending && G.pending.cell, actor: E.actor(G), sealed: !!(G.auction && G.auction.sealed) };
+  }
+  // Что получилось — коротко, внизу экрана
+  function feedback(a, b) {
+    const pl = G.players[a.player];
+    if (!pl) return;
+    const d = pl.money - b.money[a.player], nm = i => BOARD[i].name;
+    let t = null;
+    switch (a.type) {
+      case 'takeLoan':
+        if (pl.loan && pl.loan.from === BANK && !b.loan) t = `Кредит взят: +${rub(pl.loan.principal)}, вернуть ${rub(pl.loan.owe)} через ${laps(pl.loan.laps)}`;
+        else if (G.offer && G.offer.kind === 'loan') t = `Просьба о долге отправлена: ${G.players[G.offer.to].name}. Ждём ответа.`;
+        break;
+      case 'repayLoan': if (b.loan) t = `Кредит возвращён: −${rub(b.loan.owe)}`; break;
+      case 'offerTrade': t = `Предложение отправлено: ${G.players[a.to].name}. Ждём ответа.`; break;
+      case 'mortgage': t = `${nm(a.cell)} в залоге: +${rub(d)}`; break;
+      case 'unmortgage': t = `${nm(a.cell)} выкуплена: −${rub(-d)}`; break;
+      case 'build': { const o = G.own[a.cell]; t = o && o.houses === 5 ? `Отель построен: ${nm(a.cell)}` : `Дом построен: ${nm(a.cell)}${o ? ` (домов: ${o.houses})` : ''}`; break; }
+      case 'sell': t = `Продано: ${nm(a.cell)}, +${rub(d)}`; break;
+      case 'buy': if (b.cell !== undefined && G.own[b.cell] && G.own[b.cell].owner === a.player) t = `Куплено: ${nm(b.cell)}`; break;
+      case 'payJail': if (!pl.inJail) t = `Вездеход: −${rub(-d)}, вы выбрались из зимовья`; break;
+      case 'useCard': if (!pl.inJail) t = 'Карта «Попутный вездеход» использована — вы выбрались из зимовья'; break;
+      case 'payDebt': if (d < 0) t = `Оплачено: ${rub(-d)}`; break;
+      case 'bid': if (netGame()) t = b.sealed ? 'Ставка сделана втайне' : `Ваша ставка: ${rub(a.amount)}`; break;
+      case 'pass': if (netGame()) t = 'Вы спасовали'; break;
+      case 'accept': if (netGame()) t = 'Вы согласились'; break;
+      case 'reject': if (netGame()) t = 'Вы отказались'; break;
+    }
+    if (t) toast(t, 'ok');
+  }
   function send(type, extra) {
     const a = Object.assign({ type, player: netGame() ? NET.me : E.actor(G) }, extra || {});
-    if (NET.isClient()) return NET.send(a);
+    if (NET.isClient()) {
+      if (pending && Date.now() - pending.at < 8000) { toast('Подождите — хост ещё отвечает на прошлое нажатие'); return false; }
+      pending = { a, before: noteBefore(a), at: Date.now() };
+      setBusy(true);
+      clearTimeout(pendT);
+      pendT = setTimeout(() => {
+        if (!pending) return;
+        pending = null; setBusy(false);
+        toast('Хост не ответил. Проверьте связь и нажмите ещё раз.', 'bad');
+      }, 8000);
+      return NET.send(a);
+    }
     if (!netGame()) holder = a.player;
+    const before = noteBefore(a);
     const r = applyAction(a, {});
-    if (!r.ok) toast(r.error);
+    if (!r.ok) toast(r.error, 'bad');
+    else feedback(a, before);
     return r.ok;
+  }
+  // Хост отказал в действии игрока
+  function netErr(e) {
+    clearTimeout(pendT); pending = null; setBusy(false);
+    toast(e, 'bad');
   }
 
   // Применить действие к партии: на одном телефоне или у хоста.
@@ -1303,7 +1414,16 @@
       return;
     }
     NET.bar();
-    afterChange(Object.assign({}, opts, { turnChanged: G.turn !== prevTurn }), {}, -1, true);
+    const o = Object.assign({}, opts, { turnChanged: G.turn !== prevTurn });
+    if (pending) {
+      // пришло состояние после нашего нажатия — ведём себя как на одном телефоне: шторка закрывается, сообщение
+      const own = pending;
+      clearTimeout(pendT); pending = null; setBusy(false);
+      afterChange(o, own.a, own.before.actor, false);
+      feedback(own.a, own.before);
+      return;
+    }
+    afterChange(o, {}, -1, true);
   }
 
   function showQr() {
@@ -1318,6 +1438,8 @@
   function onClick(e) {
     const t = e.target.closest('[data-act],[data-fig]');
     if (!t) return;
+    if (t.getAttribute('aria-disabled') === 'true') { toast(t.dataset.why || 'Сейчас это сделать нельзя', 'bad'); FX.vibe(20); return; }
+    if (NET.isClient() && t.classList.contains('btn')) lastBtn = t;
     if (t.dataset.fig !== undefined) { readNames(); nextFigure(Number(t.dataset.fig)); renderSetup(); return; }
     const act = t.dataset.act;
     const cell = t.dataset.cell !== undefined ? Number(t.dataset.cell) : undefined;
@@ -1483,6 +1605,7 @@
       applyAction,
       setState,
       toast,
+      netErr,
       showSetup,
       refresh() { if (G && !$('game').hidden) render({}); },
       rulesHTML,

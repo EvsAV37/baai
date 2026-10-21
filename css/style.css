@@ -540,3 +540,28 @@ body {
 .btn.glow { animation: glow 1.2s ease-in-out infinite; }
 @keyframes glow { 50% { box-shadow: 0 0 0 5px rgba(201,162,58,.5); } }
 @media (prefers-reduced-motion: reduce) { .rentbar, .btn.glow { animation: none; } .btn.glow { box-shadow: 0 0 0 4px rgba(201,162,58,.5); } }
+
+/* ----- пакет 4: клетки и игроки в предложениях, отклик на нажатия ----- */
+.btn.off { opacity: .4; cursor: default; }
+.ctag { display: inline-flex; align-items: center; gap: 7px; background: #fff; border: 2px solid var(--gc, var(--ink));
+  border-radius: 10px; padding: 3px 10px 3px 3px; font-size: 18px; line-height: 1.15; }
+.ctag .sw { width: 30px; height: 30px; border-radius: 7px; background: var(--gc); display: grid; place-items: center; flex: none; }
+.ctag .sw svg { width: 20px; height: 20px; }
+.ctag em { font-style: normal; font-size: 13px; color: #2b7fb8; font-weight: 700; }
+.ctag.money { padding: 6px 12px; border-color: var(--silver); }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.whotag { display: inline-flex; align-items: center; gap: 5px; padding: 1px 10px 1px 1px; border-radius: 999px;
+  background: #fff; border: 2.5px solid var(--pc); vertical-align: middle; }
+.whotag svg { width: 26px; height: 26px; }
+.whotag b { color: var(--ink); }
+.swap .give { border-left: 6px solid #d23b2f; }
+.swap .get { border-left: 6px solid #22a45a; }
+.notice .pending { font-weight: 700; color: var(--coral); margin-top: 6px; }
+.lc { font-weight: 700; border-bottom: 3px solid var(--gc); }
+.toast { animation: toast-in .25s ease-out; font-weight: 700; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.25); pointer-events: none; }
+.toast.ok { background: #1f7a45; }
+.toast.bad { background: var(--coral); }
+@keyframes toast-in { from { transform: translate(-50%, 16px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+body.busy #actions .btn, body.busy #sheet .btn:not(.ghost) { pointer-events: none; opacity: .55; }
+.btn.wait::after { content: ' …'; }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }

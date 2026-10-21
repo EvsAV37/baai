@@ -325,7 +325,7 @@
       if (net.inGame) { net.inGame = false; net.ui.leaveGame(); showLobby(); }
       return renderLobby();
     }
-    if (m.t === 'err') return net.ui && net.ui.toast(m.error);
+    if (m.t === 'err') return net.ui && (net.ui.netErr ? net.ui.netErr(m.error) : net.ui.toast(m.error));
     if (m.t === 'state') {
       net.skew = (m.now || Date.now()) - Date.now();
       net.deadline = m.left ? Date.now() + m.left : 0;
