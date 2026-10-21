@@ -8,6 +8,7 @@
   const { BOARD, GROUPS, RULES } = BAAI.data;
   const T = BAAI.theme;
   const E = BAAI.engine;
+  const FX = BAAI.fx || { play() {}, vibe() {}, floatText() {}, coins() {}, beads() {}, toggle() {}, sound: false, vibe: false, canVibe: false };
   const rub = E.rub;
   const BANK = E.BANK;
   const $ = id => document.getElementById(id);
@@ -35,6 +36,9 @@
   let setup = { count: 3, minutes: 0, names: [], figures: ['horse', 'deer', 'choron', 'khomus', 'bear', 'crane'] };
   let trade = null;   // черновик обмена
   let loan = null;    // черновик кредита
+  let lastSnap = null; // что было на экране в прошлый раз — по разнице играем звуки и анимации
+  let heldMoney = null; // пока фишка идёт, на плашках старые суммы
+  let lastTick = -1;
 
   // ---------- сохранение ----------
   const store = {
@@ -104,8 +108,9 @@
     $('lobby').hidden = true;
     $('game').hidden = false;
     closeSheet();
-    if (!board) board = new BAAI.BoardView($('board'), { onCellTap: showCell });
+    if (!board) BAAI.board = board = new BAAI.BoardView($('board'), { onCellTap: showCell, onStep: k => FX.play('step', k) });
     else if (fresh) board.reset();
+    lastSnap = null; heldMoney = null;
     render({ turnChanged: true });
   }
 
@@ -146,6 +151,7 @@
   // Кубики катятся: несколько случайных граней, потом выпавшие
   function rollDice(d) {
     const el = $('dice'); if (!el) return;
+    FX.play('dice'); FX.vibe(25);
     el.classList.add('roll');
     let t = 0;
     const tick = () => {
@@ -276,6 +282,8 @@
     if (!el) return;
     const s = Math.max(0, Math.ceil((NET.deadline - Date.now()) / 1000));
     el.textContent = G.phase === 'auction' ? `На ставку: ${s} с, потом «Пас»` : `На ответ: ${s} с`;
+    if (G.phase === 'auction' && myMove() && s > 0 && s <= 5 && s !== lastTick) FX.play('tick');
+    lastTick = s;
   }
 
   function renderPlayers() {
@@ -287,8 +295,9 @@
       if (p.freeCards.length) tags.push(`вездеход ×${p.freeCards.length}`);
       if (netGame() && i === NET.me) tags.unshift('вы');
       if (netGame() && NET.online && !NET.online[i] && !p.bankrupt) tags.push('нет связи');
+      const money = heldMoney && heldMoney[i] !== undefined ? heldMoney[i] : p.money;
       return `<div class="pl${i === E.actor(G) ? ' cur' : ''}${p.bankrupt ? ' out' : ''}">${token(p, 36)}
-        <span class="col"><span class="nm">${esc(p.name)}</span><span class="mn">${p.bankrupt ? '—' : rub(p.money)}</span>${tags.length ? `<span class="tg">${tags.join(', ')}</span>` : ''}</span></div>`;
+        <span class="col"><span class="nm">${esc(p.name)}</span><span class="mn">${p.bankrupt ? '—' : rub(money)}</span>${tags.length ? `<span class="tg">${tags.join(', ')}</span>` : ''}</span></div>`;
     }).join('');
   }
 
@@ -369,12 +378,24 @@
 
   function render(opts) {
     opts = Object.assign({}, opts);
+    const settled = [];
+    // звуки и анимации по разнице с прошлым состоянием
+    const prev = lastSnap;
+    lastSnap = snap(G);
+    const ev = prev && prev.n === lastSnap.n ? diff(prev, lastSnap) : null;
+    heldMoney = null;
+    if (ev) {
+      playNow(ev, opts);
+      if (opts.rolled && ev.money.length) heldMoney = prev.money;
+      settled.push(() => { if (heldMoney) { heldMoney = null; renderPlayers(); } playSettled(ev); });
+    }
     // новую карточку показываем, когда фишка дошла до клетки
     if (G.card && G.card.seq > shownCard) {
       shownCard = G.card.seq;
       const card = G.card;
-      opts.onSettled = () => showCard(card);
+      settled.push(() => showCard(card));
     }
+    if (settled.length) opts.onSettled = () => settled.forEach(f => f());
     $('status').innerHTML = statusHTML();
     if (opts.rolled && G.dice) rollDice(G.dice);
     if (board) board.update(G, opts);
@@ -385,6 +406,108 @@
     renderLog();
     renderTimer();
     renderPrize();
+  }
+
+
+  // ---------- звуки и анимации ----------
+  function snap(S) {
+    const own = {};
+    for (const k in S.own) { const o = S.own[k]; own[k] = { owner: o.owner, houses: o.houses || 0, m: !!o.mortgaged }; }
+    return {
+      n: S.players.length,
+      money: S.players.map(p => p.money),
+      out: S.players.map(p => !!p.bankrupt),
+      jail: S.players.map(p => !!p.inJail),
+      own, prize: S.prize || 0, phase: S.phase, turn: S.turn, actor: E.actor(S),
+      auc: S.auction ? { cell: S.auction.cell, price: S.auction.price, leader: S.auction.leader } : null,
+    };
+  }
+
+  function diff(a, b) {
+    const ev = { money: [], bought: [], up: [], down: [], frozen: [], melted: [], jailIn: [], jailOut: [], broke: [] };
+    b.money.forEach((m, i) => { const d = m - a.money[i]; if (d && !b.out[i]) ev.money.push({ p: i, d }); });
+    for (const k in b.own) {
+      const o = b.own[k], w = a.own[k], i = Number(k);
+      if (!w || w.owner !== o.owner) ev.bought.push({ cell: i, owner: o.owner });
+      else {
+        if (o.houses > w.houses) ev.up.push({ cell: i, hotel: o.houses === 5 });
+        if (o.houses < w.houses) ev.down.push(i);
+        if (o.m && !w.m) ev.frozen.push(i);
+        if (!o.m && w.m) ev.melted.push(i);
+      }
+    }
+    b.jail.forEach((j, i) => { if (j && !a.jail[i]) ev.jailIn.push(i); if (!j && a.jail[i] && !b.out[i]) ev.jailOut.push(i); });
+    b.out.forEach((o, i) => { if (o && !a.out[i]) ev.broke.push(i); });
+    ev.fromAuction = a.phase === 'auction' && b.phase !== 'auction';
+    ev.prize = a.prize > 0 && b.prize === 0 && ev.money.some(m => m.d > 0) ? a.prize : 0;
+    ev.over = b.phase === 'over' && a.phase !== 'over';
+    ev.auctionStart = b.auc && (!a.auc || a.auc.cell !== b.auc.cell);
+    ev.bid = b.auc && a.auc && a.auc.cell === b.auc.cell && (a.auc.price !== b.auc.price || a.auc.leader !== b.auc.leader);
+    ev.offer = b.phase === 'offer' && a.phase !== 'offer';
+    ev.actorChanged = a.actor !== b.actor || a.turn !== b.turn;
+    return ev;
+  }
+
+  const chip = i => document.querySelectorAll('#players .pl')[i];
+  const boardPoint = () => $('board').getBoundingClientRect().height ? $('board') : null;
+
+  // Сразу: пурга, аукцион, просьба ответить, «ваш ход»
+  function playNow(ev) {
+    if (ev.jailIn.length) { FX.play('wind'); FX.vibe([30, 40, 30]); }
+    if (ev.auctionStart) FX.play('gavel');
+    else if (ev.bid) FX.play('bid');
+    const mineNow = netGame() ? E.actor(G) === NET.me : true;
+    if (G.phase === 'over') return;
+    if (ev.offer && mineNow) { FX.play('offer'); FX.vibe([60, 50, 60]); }
+    else if (ev.actorChanged && G.phase === 'roll' && !ev.jailIn.length) {
+      if (netGame() && E.actor(G) === NET.me) { FX.play('turn'); FX.vibe(120); }
+      else if (!netGame()) FX.play('turn');
+    }
+  }
+
+  // Когда фишка дошла: деньги, покупка, стройка, иней, приз, победа
+  function playSettled(ev) {
+    const gains = ev.money.filter(m => m.d > 0), losses = ev.money.filter(m => m.d < 0);
+    ev.money.forEach(m => FX.floatText(chip(m.p), (m.d > 0 ? '+' : '−') + rub(Math.abs(m.d)), m.d > 0));
+    const bp = boardPoint();
+    if (losses.length && gains.length) losses.forEach(l => gains.forEach(g => FX.coins(chip(l.p), chip(g.p), Math.ceil(Math.min(-l.d, g.d) / 60))));
+    else if (gains.length) gains.forEach(g => FX.coins(bp, chip(g.p), Math.ceil(g.d / 60)));
+    else if (losses.length) losses.forEach(l => FX.coins(chip(l.p), bp, Math.ceil(-l.d / 60)));
+
+    if (board) {
+      ev.bought.forEach(b => board.fx('flash', b.cell, G.players[b.owner].color));
+      ev.up.forEach(u => board.fx('puff', u.cell, u.hotel));
+      ev.frozen.forEach(i => board.fx('freeze', i));
+      ev.melted.forEach(i => board.fx('melt', i));
+      if (ev.prize) board.fx('fireworks', 20);
+      if (ev.over) board.fx('fireworks', null);
+    }
+    // один главный звук на событие
+    const sound = ev.over ? 'win' : ev.prize ? 'prize' : ev.broke.length ? 'bankrupt'
+      : ev.bought.length ? (ev.fromAuction ? 'sold' : 'buy')
+      : ev.up.some(u => u.hotel) ? 'hotel' : ev.up.length ? 'build' : ev.down.length ? 'sell'
+      : ev.frozen.length ? 'frost' : ev.melted.length ? 'melt'
+      : ev.jailOut.length ? 'calm' : gains.length ? 'coin' : losses.length ? 'pay' : null;
+    if (sound) FX.play(sound);
+    if (ev.prize || ev.over) FX.vibe([80, 60, 80, 60, 160]);
+    else if (ev.broke.length) FX.vibe(400);
+    else if (netGame() && losses.some(l => l.p === NET.me) && gains.length) FX.vibe([60, 40, 60]);
+    if (ev.over) { FX.beads(); setTimeout(showVictory, 700); }
+  }
+
+  function showVictory() {
+    if (!G || G.phase !== 'over') return;
+    const w = G.players[G.winner];
+    const rank = G.players.map((p, i) => ({ p, i, nw: p.bankrupt ? -1 : E.netWorth(G, i) })).sort((a, b) => b.nw - a.nw);
+    const cells = i => Object.keys(G.own).filter(k => G.own[k].owner === i).length;
+    openKind('victory', `<div class="victory"><div class="v-ring">${token(w, 112)}</div>
+      <p class="sub">Победитель</p><h3>${esc(w.name)}</h3>
+      <p>${G.overReason === 'time' ? `Время вышло. Самый богатый: ${rub(E.netWorth(G, G.winner))}.` : 'Остальные разорились. Байанай на вашей стороне!'}</p></div>
+      <ol class="rank">${rank.map(r => `<li class="${r.i === G.winner ? 'win' : ''}">${token(r.p, 30)}<span>${esc(r.p.name)}</span>
+        <em>${r.p.bankrupt ? 'банкрот' : `${cells(r.i)} кл.`}</em><b>${r.p.bankrupt ? '—' : rub(r.nw)}</b></li>`).join('')}</ol>
+      <p class="sub center">Богатство: деньги, клетки и дома, минус долги.</p>
+      ${NET.isClient() ? '<p class="sub center">Новую партию начнёт хост.</p>' : btn('Новая партия', 'newGame', 'primary big')}
+      ${btn('Посмотреть поле', 'close', 'ghost')}`);
   }
 
   // ---------- шторки ----------
@@ -403,6 +526,7 @@
   function openKind(kind, html) { openSheet(html); $('sheet').dataset.kind = kind; }
 
   function showCard(card) {
+    FX.play(card.deck); FX.vibe(20);
     const ic = card.deck === 'bayanai' ? icon('bow', T.C.larch, 2.2) : icon('bowl', T.C.coral, 2.2);
     openKind('card', `<div class="card-wrap"><div class="card-face ${card.deck}">${ic}
         <div class="deck">${esc(card.title)}</div><p>${esc(card.text)}</p></div></div>
@@ -579,6 +703,8 @@
   function showMenu() {
     openKind('menu', `<h3>Меню</h3>
       ${btn('Правила кратко', 'rules')}
+      <div class="toggles">${btn(`${icon(FX.sound ? 'sound' : 'mute', 'currentColor', 2.2)}${FX.sound ? 'Звук включён' : 'Звук выключен'}`, 'fxSound', 'sm ic', false, `aria-pressed="${FX.sound}"`)}
+      ${FX.canVibe ? btn(`${icon('vibe', 'currentColor', 2.2)}${FX.vibe ? 'Вибрация включена' : 'Вибрация выключена'}`, 'fxVibe', 'sm ic', false, `aria-pressed="${FX.vibe}"`) : ''}</div>
       ${NET.isHost() ? btn('QR для подключения', 'showQr') : ''}
       ${NET.isClient() ? '' : btn('Новая партия', 'askNew')}
       ${btn('Закрыть', 'close', 'ghost')}`);
@@ -707,6 +833,8 @@
       case 'close': closeSheet(); return;
       case 'info': showCell(cell); return;
       case 'rules': showRules(); return;
+      case 'fxSound': FX.toggle('sound'); showMenu(); return;
+      case 'fxVibe': FX.toggle('vibe'); showMenu(); return;
       case 'showQr': showQr(); return;
       case 'askNew':
         openKind('ask', `<h3>Начать новую партию?</h3><p>Текущая партия будет удалена.</p>
@@ -756,7 +884,15 @@
   }
 
   // ---------- запуск ----------
+  // Заставка: дерево вырастает, потом всё растворяется
+  function splash() {
+    const el = $('splash'); if (!el) return;
+    $('splash-tree').innerHTML = `<svg viewBox="-150 -150 300 300" aria-hidden="true">${T.treeSVG()}</svg>`;
+    setTimeout(() => { el.classList.add('gone'); setTimeout(() => el.remove(), 600); }, 1400);
+  }
+
   function boot(hot) {
+    splash();
     const saved = store.get(SETUP_KEY);
     if (saved && saved.figures && saved.figures.length === 6) setup = Object.assign(setup, saved);
     document.addEventListener('click', onClick);

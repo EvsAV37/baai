@@ -358,3 +358,72 @@ body {
 .notice.wait { text-align: center; }
 .sub.left, .notice .left { font-weight: 700; color: var(--coral); margin-top: 6px; }
 .net-bar { position: fixed; left: 0; right: 0; top: 0; z-index: 60; background: var(--coral); color: #fff; text-align: center; font-weight: 700; padding: calc(env(safe-area-inset-top) + 8px) 12px 8px; }
+
+/* ---------- этап 5: эффекты, победа, звук ---------- */
+.fx-layer { position: fixed; inset: 0; pointer-events: none; z-index: 40; overflow: hidden; }
+.fx-float {
+  position: fixed; transform: translate(-50%, 0); white-space: nowrap;
+  font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums;
+  padding: 1px 9px; border-radius: 999px; background: var(--paper);
+  border: 2px solid currentColor; box-shadow: 0 2px 6px rgba(29,36,48,.18);
+}
+.fx-float.good { color: var(--larch); }
+.fx-float.bad { color: var(--coral); }
+.fx-coin {
+  position: fixed; width: 16px; height: 16px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #f3dc8e, #c9a23a 60%, #8a6c1f);
+  border: 1.5px solid #6f5618;
+}
+.fx-bead { position: fixed; top: 0; border-radius: 50%; box-shadow: inset -2px -2px 0 rgba(0,0,0,.18); }
+
+/* плашка того, кто действует, мягко «дышит» */
+.pl.cur { animation: breathe 2.2s ease-in-out infinite; }
+@keyframes breathe { 50% { box-shadow: 0 0 0 4px rgba(200,71,61,.18); } }
+.pl .mn { transition: color .3s; }
+
+/* шапка победы: фишка в хороводе коралловых бус */
+.victory { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
+.victory p { margin: 0; }
+.v-ring { position: relative; width: 168px; height: 168px; display: grid; place-items: center; margin-bottom: 4px; }
+.v-ring::before {
+  content: ""; position: absolute; inset: 0; border-radius: 50%;
+  background: repeating-conic-gradient(var(--coral) 0 6deg, transparent 6deg 15deg, var(--ink) 15deg 17deg, transparent 17deg 24deg);
+  -webkit-mask: radial-gradient(circle, transparent 66%, #000 67% 74%, transparent 75%);
+          mask: radial-gradient(circle, transparent 66%, #000 67% 74%, transparent 75%);
+  animation: spin 14s linear infinite;
+}
+.v-ring svg { width: 112px; height: 112px; animation: pop .7s cubic-bezier(.2,1.6,.4,1); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pop { from { transform: scale(.3); opacity: 0; } }
+.rank { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rank li {
+  display: grid; grid-template-columns: 30px 1fr auto auto; align-items: center; gap: 10px;
+  padding: 6px 12px 6px 6px; border-radius: 12px; background: var(--snow);
+}
+.rank li.win { background: #f6e9e6; outline: 2px solid var(--coral); }
+.rank svg { width: 30px; height: 30px; }
+.rank span { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank em { font-style: normal; color: var(--muted); font-size: 14px; }
+.rank b { font-variant-numeric: tabular-nums; }
+
+.toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.toggles .btn[aria-pressed="false"] { color: var(--muted); border-style: dashed; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pl.cur, .v-ring::before, .v-ring svg { animation: none; }
+}
+
+/* заставка при запуске */
+.splash {
+  position: fixed; inset: 0; z-index: 50; background: var(--snow);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  transition: opacity .5s ease; pointer-events: none;
+}
+.splash.gone { opacity: 0; }
+.splash-tree { width: 230px; height: 230px; }
+.splash-tree svg { width: 100%; height: 100%; transform-origin: 50% 85%; animation: grow 1s cubic-bezier(.2,.9,.3,1.1) both; }
+.splash .logo { animation: rise .7s .35s ease-out both; }
+.splash .tagline { animation: rise .7s .5s ease-out both; }
+@keyframes grow { from { transform: scale(.2, .05); opacity: 0; } }
+@keyframes rise { from { transform: translateY(14px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .splash-tree svg, .splash .logo, .splash .tagline { animation: none; } }

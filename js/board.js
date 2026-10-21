@@ -73,13 +73,13 @@
       o.push(`<path d="${sectorPath(R.inn, R.out, a1, a2)}" fill="${cellFill(i)}"/>`);
       if (c.type === 'prop') o.push(`<path d="${sectorPath(R.band, R.out, a1, a2)}" fill="${T.GROUP[c.group]}"/>`);
       // иконка: верх смотрит в центр — в приближении у фишки она стоит прямо
-      const isz = corner ? 30 : 22;
+      const isz = corner ? 44 : 22;
       const [ix, iy] = polar(R.icon, a);
       const icol = corner ? '#ffffff'
         : c.type === 'prop' ? T.GROUP[c.group]
         : c.type === 'tyusyulge' ? C.coral
         : c.type === 'bayanai' ? C.larch : C.ink;
-      o.push(`<g transform="translate(${ix.toFixed(1)} ${iy.toFixed(1)}) rotate(${(a - 90).toFixed(2)}) scale(${isz / 24}) translate(-12 -12)">${T.iconSVG(cellIconName(i), icol, corner ? 2.1 : 2.3)}</g>`);
+      o.push(`<g transform="translate(${ix.toFixed(1)} ${iy.toFixed(1)}) rotate(${(a - 90).toFixed(2)}) scale(${isz / 24}) translate(-12 -12)">${T.iconSVG(cellIconName(i), icol, corner ? 1.6 : 2.3)}</g>`);
     }
 
     // тёмное внутреннее кольцо с ромбиками на границах клеток
@@ -91,15 +91,7 @@
     o.push(`<circle cx="${CX}" cy="${CY}" r="${R.center}" fill="${C.snow}"/>`);
 
     // Аал Луук Мас — дерево жизни, по центру круга
-    o.push(`<g transform="translate(360 360) scale(0.5) translate(-360 -338)"><g fill="none" stroke="${C.ink}" stroke-width="7" stroke-linecap="round">
-      <path d="M360 236V464"/>
-      <path d="M360 272c-16-8-44-4-48 18-2 14 12 20 20 10"/><path d="M360 272c16-8 44-4 48 18 2 14-12 20-20 10"/>
-      <path d="M360 316c-20-10-60-6-64 22-2 18 16 24 24 12"/><path d="M360 316c20-10 60-6 64 22 2 18-16 24-24 12"/>
-      <path d="M360 364c-24-12-76-8-80 26-2 20 18 28 28 14"/><path d="M360 364c24-12 76-8 80 26 2 20-18 28-28 14"/>
-      <path d="M360 464c-12 8-32 8-40 20M360 464c12 8 32 8 40 20M360 464v22"/>
-    </g>
-    <circle cx="360" cy="214" r="17" fill="${C.coral}"/>
-    <g fill="${C.coral}"><circle cx="332" cy="300" r="7"/><circle cx="388" cy="300" r="7"/><circle cx="320" cy="350" r="7"/><circle cx="400" cy="350" r="7"/><circle cx="308" cy="404" r="7"/><circle cx="412" cy="404" r="7"/></g></g>`);
+    o.push(`<g transform="translate(${CX} ${CY + 6}) scale(0.86)">${T.treeSVG()}</g>`);
     o.push('</svg>');
     return o.join('');
   }
@@ -319,7 +311,7 @@
             const v = tw.getValue(); const [x, y] = polar(TOKEN_R[0], a0 + (a1 - a0) * v);
             s.x = x; s.y = y; const k = Math.sin(v * Math.PI); s.setDisplaySize(TOK + 8 * k, TOK + 8 * k);
           },
-          onComplete: () => { this.shown[p] = next; left--; one(); } });
+          onComplete: () => { this.shown[p] = next; left--; if (this.view.onStep) this.view.onStep(left); one(); } });
       };
       one();
     }
@@ -329,6 +321,76 @@
       const f = this.add.circle(x + (Math.random() - 0.5) * 18, y + (Math.random() - 0.5) * 18, 2.5 + Math.random() * 2.5, 0xffffff)
         .setStrokeStyle(1.2, hex(C.silver)).setDepth(35);
       this.tweens.add({ targets: f, alpha: 0, scale: 0.2, duration: 700, onComplete: () => f.destroy() });
+    }
+
+
+    // ----- эффекты: вспышка клетки, пыль от стройки, иней, бусы-салют -----
+    sector(g, i) {
+      const a1 = rad(START[i] + 0.35), a2 = rad(START[i] + SPAN[i] - 0.35);
+      g.beginPath(); g.arc(CX, CY, R.out, a1, a2, false); g.arc(CX, CY, R.inn, a2, a1, true); g.closePath();
+    }
+
+    flash(i, color) {
+      const g = this.add.graphics().setDepth(1.5);
+      g.fillStyle(hex(color), 0.42); this.sector(g, i); g.fillPath();
+      g.lineStyle(5, hex(color), 1); this.sector(g, i); g.strokePath();
+      this.tweens.add({ targets: g, alpha: { from: 1, to: 0 }, duration: 520, repeat: 2, onComplete: () => g.destroy() });
+    }
+
+    // разлёт кружков из точки: цвета, число, дальность, время, размер
+    burst(x, y, colors, n, dist, ms, size, delay) {
+      for (let k = 0; k < n; k++) {
+        const t = (k / n) * Math.PI * 2 + Math.random() * 0.4;
+        const d = dist * (0.55 + Math.random() * 0.6);
+        const c = this.add.circle(x, y, size * (0.6 + Math.random() * 0.7), hex(colors[k % colors.length])).setDepth(36).setAlpha(0);
+        if (colors[k % colors.length] === '#ffffff') c.setStrokeStyle(1, hex(C.silver));
+        this.tweens.add({ targets: c, x: x + Math.cos(t) * d, y: y + Math.sin(t) * d, alpha: { from: 1, to: 0 }, scale: { from: 1, to: 0.4 },
+          duration: ms * (0.8 + Math.random() * 0.4), delay: delay || 0, ease: 'Cubic.easeOut', onComplete: () => c.destroy() });
+      }
+    }
+
+    // дом вырос: пыль и кольцо; отель — коралловые искры
+    puff(i, hotel) {
+      const [x, y] = polar(318, ang(i));
+      const ring = this.add.circle(x, y, 8).setStrokeStyle(3, hex(hotel ? C.coral : C.ink)).setDepth(36);
+      this.tweens.add({ targets: ring, scale: 4, alpha: 0, duration: 650, ease: 'Cubic.easeOut', onComplete: () => ring.destroy() });
+      this.burst(x, y, hotel ? [C.coral, C.gold, '#ffffff'] : ['#ffffff', C.silver, '#ffffff'], hotel ? 18 : 12, hotel ? 58 : 42, 750, 4.5);
+    }
+
+    // клетка вмерзает в лёд: белая волна и снежинки
+    freeze(i) {
+      const g = this.add.graphics().setDepth(0.6);
+      g.fillStyle(0xffffff, 0.9); this.sector(g, i); g.fillPath();
+      this.tweens.add({ targets: g, alpha: { from: 0, to: 0.9 }, duration: 260, yoyo: true, onComplete: () => g.destroy() });
+      const a = ang(i);
+      for (let k = 0; k < 9; k++) {
+        const r = R.inn + 20 + Math.random() * (R.out - R.inn - 40), d = a + (Math.random() - 0.5) * SPAN[i] * 0.7;
+        const [x, y] = polar(r, d);
+        const f = this.add.star(x, y, 6, 2.2, 8, 0xffffff).setStrokeStyle(1, hex(C.deep)).setDepth(36).setAlpha(0).setScale(0.3);
+        this.tweens.add({ targets: f, alpha: { from: 0, to: 1 }, scale: 1.3, angle: 60, duration: 420, delay: k * 50, yoyo: true, hold: 200, onComplete: () => f.destroy() });
+      }
+    }
+
+    // лёд тает: капли стекают к центру круга
+    melt(i) {
+      const a = ang(i);
+      for (let k = 0; k < 10; k++) {
+        const d = a + (Math.random() - 0.5) * SPAN[i] * 0.7;
+        const [x, y] = polar(R.out - 20 - Math.random() * 60, d);
+        const [x2, y2] = polar(R.inn - 10 - Math.random() * 30, d);
+        const c = this.add.circle(x, y, 4 + Math.random() * 3, 0x8fc1e3).setDepth(36);
+        this.tweens.add({ targets: c, x: x2, y: y2, alpha: { from: 1, to: 0 }, duration: 700 + Math.random() * 300, delay: k * 40, ease: 'Quad.easeIn', onComplete: () => c.destroy() });
+      }
+    }
+
+    // салют из бус над клеткой (приз Ысыаха) или над деревом (победа)
+    fireworks(i) {
+      const [x, y] = i === undefined || i === null ? [CX, CY - 40] : polar(R.text + 10, ang(i));
+      const cols = [C.coral, C.gold, C.larch, '#ffffff', C.deep];
+      for (let w = 0; w < 3; w++) {
+        const ox = (Math.random() - 0.5) * 50, oy = (Math.random() - 0.5) * 50;
+        this.burst(x + ox, y + oy, cols, 26, 110 + w * 20, 1100, 7, w * 320);
+      }
     }
 
     // ----- камера -----
@@ -412,7 +474,12 @@
 
     // ----- применить новое состояние партии -----
     async apply(G, opts = {}) {
-      if (this.moving) { this.queued = { G, opts }; return; }
+      if (this.moving) {
+        // не теряем то, что ждало окончания хода (карточка, звуки, монеты)
+        const prev = this.queued && this.queued.opts.onSettled;
+        if (prev) { const next = opts.onSettled; opts = Object.assign({}, opts, { onSettled: () => { prev(); if (next) next(); } }); }
+        this.queued = { G, opts }; return;
+      }
       this.moving = true;
       await this.ensureTokens(G);
       const first = this.lastTurn === undefined;
@@ -443,6 +510,7 @@
     constructor(parent, opts = {}) {
       this.el = parent;
       this.onCellTap = opts.onCellTap;
+      this.onStep = opts.onStep;
       this.pending = null;
       this.scene = new BoardScene(this);
       this.game = new Phaser.Game({
@@ -466,6 +534,8 @@
     }
     showAll() { if (this.scene.layer) this.scene.showAll(); }
     focus(cell) { if (this.scene.layer) this.scene.followCell(cell); }
+    // эффект на поле: flash, puff, freeze, melt, fireworks
+    fx(name, ...args) { const s = this.scene; if (s.layer && s[name]) s[name](...args); }
   }
 
   root.BAAI = root.BAAI || {};
