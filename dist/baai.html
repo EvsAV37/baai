@@ -152,7 +152,8 @@ body {
 .pl .tg { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- поле ---------- */
-.board-wrap { width: 100%; }
+.board-wrap { margin-inline: -12px; }   /* круг почти во всю ширину экрана, по краям тонкая полоска */
+@media (min-width: 600px) { .board-wrap { margin-inline: 0; } }
 .board {
   width: 100%; aspect-ratio: 1; position: relative; overflow: hidden;
   border: 2px solid transparent; border-radius: 26px;
@@ -195,10 +196,10 @@ body {
 
 /* ---------- имущество ---------- */
 .assets { display: flex; flex-direction: column; gap: 6px; }
-.asset { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.asset { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 44px; }
 .asset .sw { width: 30px; height: 30px; border-radius: 50%; flex: none; background: var(--gc); display: flex; align-items: center; justify-content: center; }
 .asset .sw svg { width: 18px; height: 18px; }
-.asset .info { flex: 1; min-width: 0; cursor: pointer; }
+.asset .info { flex: 1 1 140px; min-width: 0; cursor: pointer; }
 .asset .info b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .asset .info span { font-size: 14px; color: var(--muted); }
 .empty-note { color: var(--muted); margin: 0; }
@@ -489,6 +490,17 @@ body {
 .card-face.pick { font: inherit; color: var(--ink); cursor: pointer; min-height: 120px; width: 100%; animation: none; }
 .card-face.pick p { font-size: 18px; }
 .notice > svg { width: 20px; height: 20px; vertical-align: -4px; }
+
+/* ---------- стройка ---------- */
+.btn.gold { background: #f6ecd0; border-color: var(--gold, #c9a23a); }
+.notice.build { border-color: #c9a23a; background: #fbf4df; }
+.notice.build .act-row { margin-top: 8px; }
+.build-box { margin-top: 12px; border: 2px solid #c9a23a; border-radius: 14px; padding: 10px 12px; background: #fbf4df; }
+.build-box h4 { margin: 0 0 4px; display: flex; align-items: center; gap: 6px; font-size: 17px; }
+.build-box h4 svg { width: 20px; height: 20px; }
+.build-box p { margin: 0 0 6px; font-size: 16px; line-height: 1.3; }
+.build-box .act-row:empty { display: none; }
+.asset .btn.sm { white-space: nowrap; }
 
 </style>
 </head>
@@ -827,6 +839,7 @@ body {
               f: 'M10.4 4.6a1.6 1.6 0 103.2 0 1.6 1.6 0 10-3.2 0zM3.2 6.2a1.9 1.9 0 103.8 0 1.9 1.9 0 10-3.8 0z' },
     blizzard:{ s: 'M3 8h10a3 3 0 10-3-3M3 13h15a3 3 0 11-3 3M3 18h7', f: 'M18 4.2a1 1 0 102 0 1 1 0 10-2 0zM19.5 9a1 1 0 102 0 1 1 0 10-2 0zM13 19.5a1 1 0 102 0 1 1 0 10-2 0z' },
     swap:   { s: 'M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4' },
+    house:  { s: 'M3.5 11L12 4l8.5 7M6 9.5V20h12V9.5M10 20v-5h4v5' },
     card:   { s: 'M3 6h18v12H3zM3 10h18M6.5 14.5h4' },
     grow:   { s: 'M3 20h18M4 16l5-5 4 3 7-8M15 6h5v5' },
     eye:    { s: 'M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12zM9 12a3 3 0 106 0 3 3 0 10-6 0z' },
@@ -2769,8 +2782,8 @@ body {
 
   const CORNER = { 0: ['СТАРТ', '+200 ₽'], 10: ['ЗИМОВЬЁ', 'в гостях'], 20: ['ЫСЫАХ', 'приз'], 30: ['ПУРГА!', '→ в зимовьё'] };
   const TOKEN_R = [142];                             // где стоит фишка перед клеткой, внутри круга
-  const TOKEN_STEP = 18, TOKEN_MIN = 84;              // столбик: шаг между фишками и ближе к центру не заходим
-  const TOK = 26;
+  const TOKEN_STEP = 22, TOKEN_MIN = 74;              // столбик: шаг между фишками и ближе к центру не заходим
+  const TOK = 33;
   const FONT = '"PT Sans Narrow", "Roboto Condensed", "Arial Narrow", sans-serif';
 
   const rad = d => d * Math.PI / 180;
@@ -2836,7 +2849,7 @@ body {
     o.push(`<circle cx="${CX}" cy="${CY}" r="${R.center}" fill="${C.snow}"/>`);
 
     // Аал Луук Мас — дерево жизни, по центру круга
-    o.push(`<g transform="translate(${CX} ${CY + 6}) scale(0.86)">${T.treeSVG()}</g>`);
+    o.push(`<g transform="translate(${CX} ${CY + 6}) scale(0.72)">${T.treeSVG()}</g>`);
     o.push('</svg>');
     return o.join('');
   }
@@ -2877,8 +2890,11 @@ body {
         this.frost = this.add.graphics().setDepth(0.5);   // иней на заложенных клетках (под названиями)
         this.layer = this.add.graphics().setDepth(2);
         this.hl = this.add.graphics().setDepth(3);
+        this.marks = this.add.graphics().setDepth(3.5);
+        this.tweens.add({ targets: this.marks, alpha: { from: 1, to: 0.25 }, duration: 520, yoyo: true, repeat: -1 });
         this.tweens.add({ targets: this.hl, alpha: { from: 1, to: 0.35 }, duration: 700, yoyo: true, repeat: -1 });
         this.setupInput();
+        if (this.view.pendingMark) { this.mark(this.view.pendingMark); this.view.pendingMark = null; }
         if (this.view.pending) { const p = this.view.pending; this.view.pending = null; this.apply(p.G, p.opts); }
       });
     }
@@ -2902,6 +2918,7 @@ body {
         return t;
       };
       const chord = (r, span) => 2 * r * Math.sin(rad(span / 2));
+      this.labels = [];
 
       for (let i = 0; i < 40; i++) {
         const a = ang(i);
@@ -2910,7 +2927,8 @@ body {
           const fs = Math.min(16, 92 / (name.length * 0.53));
           const [x, y] = polar(R.text, a);
           const rot = Math.cos(rad(a)) >= -0.001 ? a : a + 180;   // на левой половине разворачиваем
-          txt(x, y, name, fs, rot, C.ink, true, 94);
+          const t = txt(x, y, name, fs, rot, C.ink, true, 94);
+          this.labels[i] = { t, x, y, rot, sx: t.scaleX };
         } else {
           // угол: две строки поперёк радиуса, читаются прямо, когда угол внизу или вверху
           const [main, sub] = CORNER[i];
@@ -2932,15 +2950,20 @@ body {
       for (const k in G.own) {
         const i = Number(k), o = G.own[k], a = ang(i);
         if (o.mortgaged) {
-          // заложенная клетка «вмёрзла»: белёсый налёт и снежинка
+          // заложенная клетка «вмёрзла»: белёсый налёт поверх иконки и крупная снежинка
           const a1 = rad(START[i] + 0.35), a2 = rad(START[i] + SPAN[i] - 0.35);
-          f.fillStyle(0xf4f8fb, 0.72);
+          f.fillStyle(0xeef5fa, 0.78);
           f.beginPath(); f.arc(CX, CY, R.out, a1, a2, false); f.arc(CX, CY, R.inn, a2, a1, true); f.closePath(); f.fillPath();
-          const [sx, sy] = polar(R.inn + 22, a);
-          f.lineStyle(2.2, hex(C.deep), 0.9);
+          const [sx, sy] = polar(R.icon - 2, a);
+          f.lineStyle(2.6, hex(C.deep), 0.95);
           for (let k2 = 0; k2 < 3; k2++) {
-            const t = rad(k2 * 60 + a);
-            f.lineBetween(sx - 8 * Math.cos(t), sy - 8 * Math.sin(t), sx + 8 * Math.cos(t), sy + 8 * Math.sin(t));
+            const t = rad(k2 * 60 + a), cx2 = Math.cos(t), sy2 = Math.sin(t);
+            f.lineBetween(sx - 11 * cx2, sy - 11 * sy2, sx + 11 * cx2, sy + 11 * sy2);
+            for (const e of [-1, 1]) {   // усики на концах лучей
+              const ex = sx + e * 7 * cx2, ey = sy + e * 7 * sy2, t2 = t + e * Math.PI;
+              f.lineBetween(ex, ey, ex + 4 * Math.cos(t2 + 0.7), ey + 4 * Math.sin(t2 + 0.7));
+              f.lineBetween(ex, ey, ex + 4 * Math.cos(t2 - 0.7), ey + 4 * Math.sin(t2 - 0.7));
+            }
           }
         }
         g.lineStyle(8, hex(G.players[o.owner].color), o.mortgaged ? 0.4 : 1);
@@ -2951,6 +2974,7 @@ body {
           else for (let h = 0; h < n; h++) this.quad(g, a, 318, (h - (n - 1) / 2) * 1.9, 7.5, 7.5, 0xffffff);
         }
       }
+      this.styleLabels(G);
       if (this.prizeLabel) {
         const t = this.prizeLabel;
         t.setScale(1).setText(G.prize ? 'приз ' + root.BAAI.engine.rub(G.prize) : 'приз');
@@ -2966,6 +2990,41 @@ body {
         hl.arc(CX, CY, R.inn + 2.5, a2, a1, true);
         hl.closePath(); hl.strokePath();
       }
+    }
+
+    // Название заложенной клетки бледнеет, рядом строка «выкуп N ₽»
+    styleLabels(G) {
+      const E = root.BAAI.engine;
+      (this.labels || []).forEach((L, i) => {
+        if (!L) return;
+        const m = !!(G.own[i] && G.own[i].mortgaged);
+        if (L.m === m) return;
+        L.m = m;
+        const dn = [-Math.sin(rad(L.rot)), Math.cos(rad(L.rot))];   // «вниз» для строки текста
+        const sh = m ? -6 : 0;
+        L.t.setPosition(L.x + dn[0] * sh, L.y + dn[1] * sh).setColor(m ? '#8aa3b5' : C.ink);
+        if (m && !L.sub) {
+          L.sub = this.add.text(0, 0, '', { fontFamily: FONT, fontSize: '12px', fontStyle: 'bold', color: C.deep })
+            .setOrigin(0.5).setAngle(L.rot).setResolution(3).setDepth(1);
+        }
+        if (L.sub) {
+          L.sub.setVisible(m);
+          if (m) {
+            L.sub.setScale(1).setText('выкуп ' + E.rub(E.unmortgageCost(i)));
+            if (L.sub.width > 90) L.sub.setScale(90 / L.sub.width);
+            L.sub.setPosition(L.x + dn[0] * 9, L.y + dn[1] * 9);
+          }
+        }
+      });
+    }
+
+    // золотая рамка вокруг клеток, где можно строить
+    mark(cells) {
+      const g = this.marks; g.clear();
+      (cells || []).forEach(i => {
+        g.lineStyle(6, hex(C.gold), 1); this.sector(g, i); g.strokePath();
+        g.fillStyle(hex(C.gold), 0.22); this.sector(g, i); g.fillPath();
+      });
     }
 
     // Прямоугольник на кольце: центр на угле a (+ сдвиг da градусов), радиус r
@@ -3169,18 +3228,14 @@ body {
     setupInput() {
       const cam = this.cameras.main;
       const p1 = this.input.pointer1, p2 = this.input.pointer2;
-      let down = null, pinch = null;
-      const dist = () => Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
+      let down = null;
+      // щипок двумя пальцами ведёт BoardView по событиям касания (this.pinching), здесь только один палец
       this.input.on('pointerdown', p => {
-        if (p1.isDown && p2.isDown) { pinch = { d: dist(), z: cam.zoom }; down = null; if (this.camTween) this.camTween.stop(); }
-        else down = { x: p.x, y: p.y, moved: false, mid: cam.midPoint.clone() };
+        if (this.pinching || (p1.isDown && p2.isDown)) { down = null; return; }
+        down = { x: p.x, y: p.y, moved: false, mid: cam.midPoint.clone() };
       });
       this.input.on('pointermove', p => {
-        if (pinch && p1.isDown && p2.isDown) {
-          cam.setZoom(Phaser.Math.Clamp(pinch.z * dist() / pinch.d, BASE, BASE * 3.2));
-          this.clampCam();
-          return;
-        }
+        if (this.pinching) { down = null; return; }
         if (!down || !p.isDown) return;
         const dx = p.x - down.x, dy = p.y - down.y;
         if (!down.moved && Math.hypot(dx, dy) < 10) return;
@@ -3193,7 +3248,7 @@ body {
         this.clampCam();
       });
       this.input.on('pointerup', p => {
-        if (pinch) { if (!p1.isDown && !p2.isDown) pinch = null; return; }
+        if (this.pinching) { down = null; return; }
         if (down && !down.moved) this.tap(p);
         down = null;
       });
@@ -3203,7 +3258,29 @@ body {
       });
     }
 
+    // Щипок: точка поля под пальцами остаётся под пальцами
+    pinchStart(x, y) {
+      const cam = this.cameras.main;
+      if (this.camTween) this.camTween.stop();
+      cam.preRender();
+      this.pinching = { z: cam.zoom, w: cam.getWorldPoint(x, y) };
+    }
+    pinchMove(k, x, y) {
+      const P = this.pinching; if (!P) return;
+      const cam = this.cameras.main;
+      cam.setZoom(Phaser.Math.Clamp(P.z * k, BASE, BASE * 3.2));
+      cam.preRender();
+      const w = cam.getWorldPoint(x, y), m = cam.midPoint;
+      cam.centerOn(m.x + P.w.x - w.x, m.y + P.w.y - w.y);
+      this.clampCam();
+    }
+    pinchEnd() { this.pinching = null; }
+
     tap(p) {
+      // одно касание может прийти дважды (касание и мышь) — второе не считаем
+      const now = Date.now();
+      if (now - (this.lastTap || 0) < 400) return;
+      this.lastTap = now;
       const w = this.cameras.main.getWorldPoint(p.x, p.y);
       const dx = w.x - CX, dy = w.y - CY, r = Math.hypot(dx, dy);
       if (r < R.inn - 50 || r > R.out + 4) return;     // клетка или фишки перед ней
@@ -3264,9 +3341,49 @@ body {
         banner: false, audio: { noAudio: true },
         scene: this.scene,
       });
+      this.pinchTouch(inner);
       // поворот экрана, клавиатура, панель браузера — пересчитать размер холста
       if (window.ResizeObserver) new ResizeObserver(() => this.game.scale && this.game.scale.refresh()).observe(inner);
     }
+    // Два пальца на поле всегда приближают поле, а не страницу (Яндекс Браузер, Chrome, Safari).
+    // Ловим касания сами и не отдаём их браузеру; один палец по-прежнему листает страницу.
+    pinchTouch(el) {
+      let d0 = 0;
+      const two = e => e.touches.length >= 2;
+      const pts = e => {
+        const sc = this.game.scale, a = e.touches[0], b = e.touches[1];
+        const ax = sc.transformX(a.pageX), ay = sc.transformY(a.pageY), bx = sc.transformX(b.pageX), by = sc.transformY(b.pageY);
+        return { d: Math.hypot(ax - bx, ay - by) || 1, x: (ax + bx) / 2, y: (ay + by) / 2 };
+      };
+      const start = e => {
+        if (!two(e) || !this.scene.layer) return;
+        if (e.cancelable) e.preventDefault();
+        const p = pts(e); d0 = p.d;
+        this.scene.pinchStart(p.x, p.y);
+      };
+      const move = e => {
+        if (!this.scene.pinching) return;
+        if (e.cancelable) e.preventDefault();
+        if (!two(e)) return;
+        const p = pts(e);
+        this.scene.pinchMove(p.d / d0, p.x, p.y);
+      };
+      const end = e => {
+        if (!this.scene.pinching) return;
+        if (e.cancelable) e.preventDefault();
+        if (two(e)) { const p = pts(e); d0 = p.d; this.scene.pinchStart(p.x, p.y); return; }
+        // последний палец отпущен — только тогда снова можно тапать и листать
+        if (!e.touches.length) setTimeout(() => this.scene.pinchEnd(), 50);
+      };
+      el.addEventListener('touchstart', start, { passive: false });
+      el.addEventListener('touchmove', move, { passive: false });
+      el.addEventListener('touchend', end, { passive: false });
+      el.addEventListener('touchcancel', end, { passive: false });
+      // жест-зум страницы в Safari
+      el.addEventListener('gesturestart', e => e.preventDefault());
+    }
+    // Подсветить клетки (где можно строить); пустой список — убрать
+    mark(cells) { if (this.scene.layer) this.scene.mark(cells); else this.pendingMark = cells; }
     setZoomed(z) { this.el.classList.toggle('zoomed', z); }
     update(G, opts) {
       const s = this.scene;
@@ -6313,7 +6430,7 @@ var qrcode = function() {
     $('lobby').hidden = true;
     $('game').hidden = false;
     closeSheet();
-    if (!board) BAAI.board = board = new BAAI.BoardView($('board'), { onCellTap: showCell, onStep: k => FX.play('step', k) });
+    if (!board) BAAI.board = board = new BAAI.BoardView($('board'), { onCellTap: onBoardTap, onStep: k => FX.play('step', k) });
     else if (fresh) board.reset();
     lastSnap = null; heldMoney = null;
     render({ turnChanged: true });
@@ -6375,11 +6492,58 @@ var qrcode = function() {
     return `<button type="button" class="btn ${cls}" data-act="${action}" ${extra} ${disabled ? 'disabled' : ''}>${label}</button>`;
   }
 
+  // ----- стройка -----
+  // Может ли игрок p сейчас строить на клетке i; если нет — понятная причина
+  const calmPhase = () => G.phase === 'roll' || G.phase === 'end';
+  function buildWhy(p, i) {
+    const c = BOARD[i], o = G.own[i];
+    if (!c || c.type !== 'prop' || !o || o.owner !== p) return null;
+    const cells = E.groupCells(c.group), g = GROUPS[c.group];
+    const lack = cells.filter(j => !G.own[j] || G.own[j].owner !== p);
+    if (lack.length) return { why: `Дома можно ставить, когда у вас вся группа «${g.name}». Не хватает: ${lack.map(j => BOARD[j].name).join(', ')}.` };
+    const frozen = cells.filter(j => G.own[j].mortgaged);
+    if (frozen.length) return { why: `В группе заложена клетка: ${frozen.map(j => BOARD[j].name).join(', ')}. Сначала выкупите её.` };
+    if (o.houses >= 5) return { why: 'Здесь уже стоит отель — больше строить некуда.' };
+    const min = Math.min(...cells.map(j => G.own[j].houses));
+    if (o.houses > min) {
+      const next = cells.filter(j => G.own[j].houses === min).map(j => BOARD[j].name);
+      return { why: `Дома ставятся поровну по всей группе. Сначала постройте на: ${next.join(', ')}.` };
+    }
+    const cost = E.houseCost(G, c.group, p);
+    if (G.players[p].money < cost) return { why: `Не хватает денег: ${o.houses === 4 ? 'отель' : 'дом'} стоит ${rub(cost)}, у вас ${rub(G.players[p].money)}.` };
+    if (!myMove() || E.actor(G) !== p || !calmPhase()) return { why: 'Строить можно в свой ход — до броска кубиков или после.' };
+    return { ok: true };
+  }
+  // Клетки, где игрок может поставить дом прямо сейчас
+  function buildable(p) {
+    if (!G || G.phase === 'over' || !myMove() || E.actor(G) !== p || !calmPhase() || G.players[p].bankrupt) return [];
+    return Object.keys(G.own).map(Number).filter(i => E.canBuild(G, p, i));
+  }
+  const houseWord = (i, p) => {
+    const c = BOARD[i], hotel = G.own[i] && G.own[i].houses === 4;
+    return `Построить ${hotel ? 'отель' : 'дом'} · ${rub(E.houseCost(G, c.group, p))}`;
+  };
+  const sellWord = i => `Продать ${G.own[i].houses === 5 ? 'отель' : 'дом'} · ${rub(E.sellValue(i, G))}`;
+  let buildMode = false;          // режим «Строить»: на поле подсвечены клетки, нажатие ставит дом
+  const buildHinted = new Set();  // кому уже показали «Группа собрана»
+  function syncMarks() {
+    if (!board) return;
+    const p = G && me();
+    const cells = G && buildMode ? buildable(p) : [];
+    if (buildMode && !cells.length) buildMode = false;
+    board.mark(cells);
+  }
+  function onBoardTap(i) {
+    if (buildMode && buildable(me()).includes(i)) { send('build', { cell: i }); return; }
+    showCell(i);
+  }
+
   // Кнопки «Обмен» и «Кредит» — доступны в спокойные моменты своего хода
   function sideRow(pl) {
     const canTrade = G.phase === 'roll' || G.phase === 'end';
     const canLoan = ['roll', 'end', 'debt', 'buy'].includes(G.phase);
     const parts = [];
+    if (buildable(G.turn).length) parts.push(btn(`${icon('house', 'currentColor', 2.2)}Строить`, 'buildMode', 'sm ic gold'));
     if (canTrade) parts.push(btn(`${icon('swap', 'currentColor', 2.2)}Обмен`, 'tradeOpen', 'sm ic'));
     if (canLoan) parts.push(btn(`${icon('card', 'currentColor', 2.2)}${pl.loan ? 'Кредит · ' + rub(pl.loan.owe) : 'Кредит'}`, 'loanOpen', 'sm ic'));
     return parts.length ? `<div class="act-row side">${parts.join('')}</div>` : '';
@@ -6486,6 +6650,12 @@ var qrcode = function() {
       h += offerHTML();
     } else if (pl.bankrupt) {
       h += `<div class="act-row">${btn('Завершить ход', 'endTurn', 'dark big')}</div>`;
+    } else if (buildMode && calmPhase() && buildable(G.turn).length) {
+      h += `<div class="notice build">Нажмите на клетку в золотой рамке — там встанет дом. Дома ставятся поровну по группе, после четырёх домов — отель.</div>
+        <div class="act-row">${btn('Готово', 'buildDone', 'primary big')}</div>`;
+      $('actions').innerHTML = h;
+      tickLeft();
+      return;
     } else if (G.phase === 'roll' && pl.inJail) {
       h += `<div class="notice">Вы в зимовье, снаружи пурга. Попытка ${pl.jailTries + 1} из ${RULES.maxJailTries}: выбросьте дубль — пурга стихнет. Или вызовите вездеход за ${RULES.jailFine} ₽.</div>`;
       h += `<div class="act-row">${btn('Бросить на дубль', 'roll', 'primary')}${btn(`Вездеход · ${RULES.jailFine} ₽`, 'payJail', '', pl.money < RULES.jailFine)}${pl.freeCards.length ? btn('Попутный вездеход', 'useCard') : ''}</div>`;
@@ -6509,6 +6679,11 @@ var qrcode = function() {
       h += `<div class="act-row">${btn('Заплатить', 'payDebt', 'primary', !can)}${btn('Объявить банкротство', 'bankrupt', 'danger', can)}</div>`;
     } else if (G.phase === 'end') {
       h += `<div class="act-row">${btn('Завершить ход', 'endTurn', 'dark big')}</div>`;
+    }
+    if (calmPhase() && !pl.bankrupt && !buildHinted.has(G.turn) && buildable(G.turn).length) {
+      const g = GROUPS[BOARD[buildable(G.turn)[0]].group];
+      h = `<div class="notice build"><b>Группа «${esc(g.name)}» собрана!</b> Теперь на её клетках можно строить дома — аренда вырастет в разы.
+        <div class="act-row">${btn('Строить', 'buildMode', 'primary')}${btn('Позже', 'buildLater', 'ghost')}</div></div>` + h;
     }
     if (['roll', 'end'].includes(G.phase) && !pl.bankrupt) h += abilityBtn();
     if (G.phase !== 'over' && !pl.bankrupt && !['auction', 'offer', 'roles', 'omen', 'pick2'].includes(G.phase)) h += sideRow(pl);
@@ -6586,12 +6761,12 @@ var qrcode = function() {
       if (canAct) {
         const houses = c.type === 'prop' && E.groupHasHouses(G, c.group);
         if (houses) {
-          btns = `<button type="button" class="btn sm" data-act="sell" data-cell="${i}" ${E.canSell(G, p, i) ? '' : 'disabled'} aria-label="Продать дом">−</button>
-            <button type="button" class="btn sm" data-act="build" data-cell="${i}" ${E.canBuild(G, p, i) && calm ? '' : 'disabled'} aria-label="Построить за ${E.houseCost(G, c.group)} ₽">+ ${E.houseCost(G, c.group)}</button>`;
+          if (E.canSell(G, p, i)) btns += `<button type="button" class="btn sm" data-act="sell" data-cell="${i}">${sellWord(i)}</button>`;
+          if (E.canBuild(G, p, i) && calm) btns += `<button type="button" class="btn sm gold" data-act="build" data-cell="${i}">${houseWord(i, p)}</button>`;
         } else if (o.mortgaged) {
           if (calm) btns = `<button type="button" class="btn sm" data-act="unmortgage" data-cell="${i}" ${E.canUnmortgage(G, p, i) ? '' : 'disabled'}>Выкуп</button>`;
         } else {
-          if (calm && E.canBuild(G, p, i)) btns += `<button type="button" class="btn sm" data-act="build" data-cell="${i}" aria-label="Построить за ${E.houseCost(G, c.group)} ₽">+ ${E.houseCost(G, c.group)}</button>`;
+          if (calm && E.canBuild(G, p, i)) btns += `<button type="button" class="btn sm gold" data-act="build" data-cell="${i}">${houseWord(i, p)}</button>`;
           btns += `<button type="button" class="btn sm" data-act="mortgage" data-cell="${i}" aria-label="Заложить за ${E.mortgageValue(i)} ₽">Залог</button>`;
         }
       }
@@ -6646,7 +6821,9 @@ var qrcode = function() {
     if (opts.rolled && G.dice) rollDice(G.dice);
     if (board) board.update(G, opts);
     else if (opts.onSettled) opts.onSettled();
+    if (opts.turnChanged || !G || !calmPhase()) buildMode = false;
     renderActions();
+    syncMarks();
     renderPlayers();
     renderAssets();
     renderLog();
@@ -6812,8 +6989,13 @@ var qrcode = function() {
           <tr><td>Дом или отель</td><td>${rub(E.houseCost(G, c.group))}</td></tr>
           ${mortRows}${ownerRow}
         </tbody></table>`;
-      if (o && o.owner === G.turn && myMove() && E.ownsGroup(G, G.turn, c.group) && !o.mortgaged && ['roll', 'end', 'debt', 'buy'].includes(G.phase)) {
-        h += `<div class="act-row">${btn('Продать дом', 'sell', '', !E.canSell(G, G.turn, i), `data-cell="${i}"`)}${btn(`Построить · ${rub(E.houseCost(G, c.group))}`, 'build', 'primary', !E.canBuild(G, G.turn, i) || !['roll', 'end'].includes(G.phase), `data-cell="${i}"`)}</div>`;
+      const p = me();
+      if (o && o.owner === p && !G.players[p].bankrupt) {
+        const b = buildWhy(p, i);
+        const canSellNow = E.canSell(G, p, i) && myMove() && E.actor(G) === p && ['roll', 'end', 'debt', 'buy'].includes(G.phase);
+        h += `<div class="build-box"><h4>${icon('house', T.C.ink, 2.2)}Строительство</h4>
+          ${b && b.ok ? '' : `<p>${esc(b ? b.why : '')}</p>`}
+          <div class="act-row">${b && b.ok ? btn(houseWord(i, p), 'build', 'primary big', false, `data-cell="${i}"`) : ''}${canSellNow ? btn(sellWord(i), 'sell', '', false, `data-cell="${i}"`) : ''}</div></div>`;
       }
     } else if (c.type === 'transport') {
       h = head(c.name, 'Транспорт') + `<table class="rent"><tbody>
@@ -6838,9 +7020,9 @@ var qrcode = function() {
       h = head(c.name, 'Клетка') + `<p>${esc(about)}</p>`;
     }
     // залог своей клетки
-    const me = G.turn, mine = o && o.owner === me && !G.players[me].bankrupt && myMove();
+    const tp = G.turn, mine = o && o.owner === tp && !G.players[tp].bankrupt && myMove();
     if (mine && o.mortgaged && (G.phase === 'roll' || G.phase === 'end')) {
-      h += `<div class="act-row">${btn(`Выкупить · ${rub(E.unmortgageCost(i))}`, 'unmortgage', 'primary', !E.canUnmortgage(G, me, i), `data-cell="${i}"`)}</div>`;
+      h += `<div class="act-row">${btn(`Выкупить · ${rub(E.unmortgageCost(i))}`, 'unmortgage', 'primary', !E.canUnmortgage(G, tp, i), `data-cell="${i}"`)}</div>`;
     } else if (mine && !o.mortgaged && ['roll', 'end', 'debt', 'buy'].includes(G.phase)) {
       const blocked = c.type === 'prop' && E.groupHasHouses(G, c.group);
       h += `<div class="act-row">${btn(`Заложить · +${rub(E.mortgageValue(i))}`, 'mortgage', '', blocked, `data-cell="${i}"`)}</div>`;
@@ -7140,7 +7322,7 @@ var qrcode = function() {
       case 'newGame':
         clearTimeout(botT);
         if (netGame()) { G = null; closeSheet(); NET.backToLobby(); return; }
-        G = null; store.set(SAVE_KEY, null); showSetup(); return;
+        G = null; buildMode = false; buildHinted.clear(); store.set(SAVE_KEY, null); showSetup(); return;
 
       // обмен
       case 'tradeOpen':
@@ -7175,6 +7357,9 @@ var qrcode = function() {
       case 'lTake': send('takeLoan', { from: loan.from, amount: loan.amount, rate: loan.rate, laps: loan.laps }); return;
       case 'loanRepay': send('repayLoan'); return;
 
+      case 'buildMode': buildMode = true; buildHinted.add(G.turn); closeSheet(); render({}); return;
+      case 'buildDone': buildMode = false; render({}); return;
+      case 'buildLater': buildHinted.add(G.turn); render({}); return;
       case 'bid': send('bid', { amount: num('amount') }); return;
       case 'roleShow': showRole(num('p')); return;
       case 'pickRole': send('pickRole', { role: t.dataset.role }); return;

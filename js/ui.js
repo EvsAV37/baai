@@ -223,7 +223,7 @@
     $('lobby').hidden = true;
     $('game').hidden = false;
     closeSheet();
-    if (!board) BAAI.board = board = new BAAI.BoardView($('board'), { onCellTap: showCell, onStep: k => FX.play('step', k) });
+    if (!board) BAAI.board = board = new BAAI.BoardView($('board'), { onCellTap: onBoardTap, onStep: k => FX.play('step', k) });
     else if (fresh) board.reset();
     lastSnap = null; heldMoney = null;
     render({ turnChanged: true });
@@ -285,11 +285,58 @@
     return `<button type="button" class="btn ${cls}" data-act="${action}" ${extra} ${disabled ? 'disabled' : ''}>${label}</button>`;
   }
 
+  // ----- стройка -----
+  // Может ли игрок p сейчас строить на клетке i; если нет — понятная причина
+  const calmPhase = () => G.phase === 'roll' || G.phase === 'end';
+  function buildWhy(p, i) {
+    const c = BOARD[i], o = G.own[i];
+    if (!c || c.type !== 'prop' || !o || o.owner !== p) return null;
+    const cells = E.groupCells(c.group), g = GROUPS[c.group];
+    const lack = cells.filter(j => !G.own[j] || G.own[j].owner !== p);
+    if (lack.length) return { why: `Дома можно ставить, когда у вас вся группа «${g.name}». Не хватает: ${lack.map(j => BOARD[j].name).join(', ')}.` };
+    const frozen = cells.filter(j => G.own[j].mortgaged);
+    if (frozen.length) return { why: `В группе заложена клетка: ${frozen.map(j => BOARD[j].name).join(', ')}. Сначала выкупите её.` };
+    if (o.houses >= 5) return { why: 'Здесь уже стоит отель — больше строить некуда.' };
+    const min = Math.min(...cells.map(j => G.own[j].houses));
+    if (o.houses > min) {
+      const next = cells.filter(j => G.own[j].houses === min).map(j => BOARD[j].name);
+      return { why: `Дома ставятся поровну по всей группе. Сначала постройте на: ${next.join(', ')}.` };
+    }
+    const cost = E.houseCost(G, c.group, p);
+    if (G.players[p].money < cost) return { why: `Не хватает денег: ${o.houses === 4 ? 'отель' : 'дом'} стоит ${rub(cost)}, у вас ${rub(G.players[p].money)}.` };
+    if (!myMove() || E.actor(G) !== p || !calmPhase()) return { why: 'Строить можно в свой ход — до броска кубиков или после.' };
+    return { ok: true };
+  }
+  // Клетки, где игрок может поставить дом прямо сейчас
+  function buildable(p) {
+    if (!G || G.phase === 'over' || !myMove() || E.actor(G) !== p || !calmPhase() || G.players[p].bankrupt) return [];
+    return Object.keys(G.own).map(Number).filter(i => E.canBuild(G, p, i));
+  }
+  const houseWord = (i, p) => {
+    const c = BOARD[i], hotel = G.own[i] && G.own[i].houses === 4;
+    return `Построить ${hotel ? 'отель' : 'дом'} · ${rub(E.houseCost(G, c.group, p))}`;
+  };
+  const sellWord = i => `Продать ${G.own[i].houses === 5 ? 'отель' : 'дом'} · ${rub(E.sellValue(i, G))}`;
+  let buildMode = false;          // режим «Строить»: на поле подсвечены клетки, нажатие ставит дом
+  const buildHinted = new Set();  // кому уже показали «Группа собрана»
+  function syncMarks() {
+    if (!board) return;
+    const p = G && me();
+    const cells = G && buildMode ? buildable(p) : [];
+    if (buildMode && !cells.length) buildMode = false;
+    board.mark(cells);
+  }
+  function onBoardTap(i) {
+    if (buildMode && buildable(me()).includes(i)) { send('build', { cell: i }); return; }
+    showCell(i);
+  }
+
   // Кнопки «Обмен» и «Кредит» — доступны в спокойные моменты своего хода
   function sideRow(pl) {
     const canTrade = G.phase === 'roll' || G.phase === 'end';
     const canLoan = ['roll', 'end', 'debt', 'buy'].includes(G.phase);
     const parts = [];
+    if (buildable(G.turn).length) parts.push(btn(`${icon('house', 'currentColor', 2.2)}Строить`, 'buildMode', 'sm ic gold'));
     if (canTrade) parts.push(btn(`${icon('swap', 'currentColor', 2.2)}Обмен`, 'tradeOpen', 'sm ic'));
     if (canLoan) parts.push(btn(`${icon('card', 'currentColor', 2.2)}${pl.loan ? 'Кредит · ' + rub(pl.loan.owe) : 'Кредит'}`, 'loanOpen', 'sm ic'));
     return parts.length ? `<div class="act-row side">${parts.join('')}</div>` : '';
@@ -396,6 +443,12 @@
       h += offerHTML();
     } else if (pl.bankrupt) {
       h += `<div class="act-row">${btn('Завершить ход', 'endTurn', 'dark big')}</div>`;
+    } else if (buildMode && calmPhase() && buildable(G.turn).length) {
+      h += `<div class="notice build">Нажмите на клетку в золотой рамке — там встанет дом. Дома ставятся поровну по группе, после четырёх домов — отель.</div>
+        <div class="act-row">${btn('Готово', 'buildDone', 'primary big')}</div>`;
+      $('actions').innerHTML = h;
+      tickLeft();
+      return;
     } else if (G.phase === 'roll' && pl.inJail) {
       h += `<div class="notice">Вы в зимовье, снаружи пурга. Попытка ${pl.jailTries + 1} из ${RULES.maxJailTries}: выбросьте дубль — пурга стихнет. Или вызовите вездеход за ${RULES.jailFine} ₽.</div>`;
       h += `<div class="act-row">${btn('Бросить на дубль', 'roll', 'primary')}${btn(`Вездеход · ${RULES.jailFine} ₽`, 'payJail', '', pl.money < RULES.jailFine)}${pl.freeCards.length ? btn('Попутный вездеход', 'useCard') : ''}</div>`;
@@ -419,6 +472,11 @@
       h += `<div class="act-row">${btn('Заплатить', 'payDebt', 'primary', !can)}${btn('Объявить банкротство', 'bankrupt', 'danger', can)}</div>`;
     } else if (G.phase === 'end') {
       h += `<div class="act-row">${btn('Завершить ход', 'endTurn', 'dark big')}</div>`;
+    }
+    if (calmPhase() && !pl.bankrupt && !buildHinted.has(G.turn) && buildable(G.turn).length) {
+      const g = GROUPS[BOARD[buildable(G.turn)[0]].group];
+      h = `<div class="notice build"><b>Группа «${esc(g.name)}» собрана!</b> Теперь на её клетках можно строить дома — аренда вырастет в разы.
+        <div class="act-row">${btn('Строить', 'buildMode', 'primary')}${btn('Позже', 'buildLater', 'ghost')}</div></div>` + h;
     }
     if (['roll', 'end'].includes(G.phase) && !pl.bankrupt) h += abilityBtn();
     if (G.phase !== 'over' && !pl.bankrupt && !['auction', 'offer', 'roles', 'omen', 'pick2'].includes(G.phase)) h += sideRow(pl);
@@ -496,12 +554,12 @@
       if (canAct) {
         const houses = c.type === 'prop' && E.groupHasHouses(G, c.group);
         if (houses) {
-          btns = `<button type="button" class="btn sm" data-act="sell" data-cell="${i}" ${E.canSell(G, p, i) ? '' : 'disabled'} aria-label="Продать дом">−</button>
-            <button type="button" class="btn sm" data-act="build" data-cell="${i}" ${E.canBuild(G, p, i) && calm ? '' : 'disabled'} aria-label="Построить за ${E.houseCost(G, c.group)} ₽">+ ${E.houseCost(G, c.group)}</button>`;
+          if (E.canSell(G, p, i)) btns += `<button type="button" class="btn sm" data-act="sell" data-cell="${i}">${sellWord(i)}</button>`;
+          if (E.canBuild(G, p, i) && calm) btns += `<button type="button" class="btn sm gold" data-act="build" data-cell="${i}">${houseWord(i, p)}</button>`;
         } else if (o.mortgaged) {
           if (calm) btns = `<button type="button" class="btn sm" data-act="unmortgage" data-cell="${i}" ${E.canUnmortgage(G, p, i) ? '' : 'disabled'}>Выкуп</button>`;
         } else {
-          if (calm && E.canBuild(G, p, i)) btns += `<button type="button" class="btn sm" data-act="build" data-cell="${i}" aria-label="Построить за ${E.houseCost(G, c.group)} ₽">+ ${E.houseCost(G, c.group)}</button>`;
+          if (calm && E.canBuild(G, p, i)) btns += `<button type="button" class="btn sm gold" data-act="build" data-cell="${i}">${houseWord(i, p)}</button>`;
           btns += `<button type="button" class="btn sm" data-act="mortgage" data-cell="${i}" aria-label="Заложить за ${E.mortgageValue(i)} ₽">Залог</button>`;
         }
       }
@@ -556,7 +614,9 @@
     if (opts.rolled && G.dice) rollDice(G.dice);
     if (board) board.update(G, opts);
     else if (opts.onSettled) opts.onSettled();
+    if (opts.turnChanged || !G || !calmPhase()) buildMode = false;
     renderActions();
+    syncMarks();
     renderPlayers();
     renderAssets();
     renderLog();
@@ -722,8 +782,13 @@
           <tr><td>Дом или отель</td><td>${rub(E.houseCost(G, c.group))}</td></tr>
           ${mortRows}${ownerRow}
         </tbody></table>`;
-      if (o && o.owner === G.turn && myMove() && E.ownsGroup(G, G.turn, c.group) && !o.mortgaged && ['roll', 'end', 'debt', 'buy'].includes(G.phase)) {
-        h += `<div class="act-row">${btn('Продать дом', 'sell', '', !E.canSell(G, G.turn, i), `data-cell="${i}"`)}${btn(`Построить · ${rub(E.houseCost(G, c.group))}`, 'build', 'primary', !E.canBuild(G, G.turn, i) || !['roll', 'end'].includes(G.phase), `data-cell="${i}"`)}</div>`;
+      const p = me();
+      if (o && o.owner === p && !G.players[p].bankrupt) {
+        const b = buildWhy(p, i);
+        const canSellNow = E.canSell(G, p, i) && myMove() && E.actor(G) === p && ['roll', 'end', 'debt', 'buy'].includes(G.phase);
+        h += `<div class="build-box"><h4>${icon('house', T.C.ink, 2.2)}Строительство</h4>
+          ${b && b.ok ? '' : `<p>${esc(b ? b.why : '')}</p>`}
+          <div class="act-row">${b && b.ok ? btn(houseWord(i, p), 'build', 'primary big', false, `data-cell="${i}"`) : ''}${canSellNow ? btn(sellWord(i), 'sell', '', false, `data-cell="${i}"`) : ''}</div></div>`;
       }
     } else if (c.type === 'transport') {
       h = head(c.name, 'Транспорт') + `<table class="rent"><tbody>
@@ -748,9 +813,9 @@
       h = head(c.name, 'Клетка') + `<p>${esc(about)}</p>`;
     }
     // залог своей клетки
-    const me = G.turn, mine = o && o.owner === me && !G.players[me].bankrupt && myMove();
+    const tp = G.turn, mine = o && o.owner === tp && !G.players[tp].bankrupt && myMove();
     if (mine && o.mortgaged && (G.phase === 'roll' || G.phase === 'end')) {
-      h += `<div class="act-row">${btn(`Выкупить · ${rub(E.unmortgageCost(i))}`, 'unmortgage', 'primary', !E.canUnmortgage(G, me, i), `data-cell="${i}"`)}</div>`;
+      h += `<div class="act-row">${btn(`Выкупить · ${rub(E.unmortgageCost(i))}`, 'unmortgage', 'primary', !E.canUnmortgage(G, tp, i), `data-cell="${i}"`)}</div>`;
     } else if (mine && !o.mortgaged && ['roll', 'end', 'debt', 'buy'].includes(G.phase)) {
       const blocked = c.type === 'prop' && E.groupHasHouses(G, c.group);
       h += `<div class="act-row">${btn(`Заложить · +${rub(E.mortgageValue(i))}`, 'mortgage', '', blocked, `data-cell="${i}"`)}</div>`;
@@ -1050,7 +1115,7 @@
       case 'newGame':
         clearTimeout(botT);
         if (netGame()) { G = null; closeSheet(); NET.backToLobby(); return; }
-        G = null; store.set(SAVE_KEY, null); showSetup(); return;
+        G = null; buildMode = false; buildHinted.clear(); store.set(SAVE_KEY, null); showSetup(); return;
 
       // обмен
       case 'tradeOpen':
@@ -1085,6 +1150,9 @@
       case 'lTake': send('takeLoan', { from: loan.from, amount: loan.amount, rate: loan.rate, laps: loan.laps }); return;
       case 'loanRepay': send('repayLoan'); return;
 
+      case 'buildMode': buildMode = true; buildHinted.add(G.turn); closeSheet(); render({}); return;
+      case 'buildDone': buildMode = false; render({}); return;
+      case 'buildLater': buildHinted.add(G.turn); render({}); return;
       case 'bid': send('bid', { amount: num('amount') }); return;
       case 'roleShow': showRole(num('p')); return;
       case 'pickRole': send('pickRole', { role: t.dataset.role }); return;

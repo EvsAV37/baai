@@ -25,8 +25,8 @@
 
   const CORNER = { 0: ['СТАРТ', '+200 ₽'], 10: ['ЗИМОВЬЁ', 'в гостях'], 20: ['ЫСЫАХ', 'приз'], 30: ['ПУРГА!', '→ в зимовьё'] };
   const TOKEN_R = [142];                             // где стоит фишка перед клеткой, внутри круга
-  const TOKEN_STEP = 18, TOKEN_MIN = 84;              // столбик: шаг между фишками и ближе к центру не заходим
-  const TOK = 26;
+  const TOKEN_STEP = 22, TOKEN_MIN = 74;              // столбик: шаг между фишками и ближе к центру не заходим
+  const TOK = 33;
   const FONT = '"PT Sans Narrow", "Roboto Condensed", "Arial Narrow", sans-serif';
 
   const rad = d => d * Math.PI / 180;
@@ -92,7 +92,7 @@
     o.push(`<circle cx="${CX}" cy="${CY}" r="${R.center}" fill="${C.snow}"/>`);
 
     // Аал Луук Мас — дерево жизни, по центру круга
-    o.push(`<g transform="translate(${CX} ${CY + 6}) scale(0.86)">${T.treeSVG()}</g>`);
+    o.push(`<g transform="translate(${CX} ${CY + 6}) scale(0.72)">${T.treeSVG()}</g>`);
     o.push('</svg>');
     return o.join('');
   }
@@ -133,8 +133,11 @@
         this.frost = this.add.graphics().setDepth(0.5);   // иней на заложенных клетках (под названиями)
         this.layer = this.add.graphics().setDepth(2);
         this.hl = this.add.graphics().setDepth(3);
+        this.marks = this.add.graphics().setDepth(3.5);
+        this.tweens.add({ targets: this.marks, alpha: { from: 1, to: 0.25 }, duration: 520, yoyo: true, repeat: -1 });
         this.tweens.add({ targets: this.hl, alpha: { from: 1, to: 0.35 }, duration: 700, yoyo: true, repeat: -1 });
         this.setupInput();
+        if (this.view.pendingMark) { this.mark(this.view.pendingMark); this.view.pendingMark = null; }
         if (this.view.pending) { const p = this.view.pending; this.view.pending = null; this.apply(p.G, p.opts); }
       });
     }
@@ -158,6 +161,7 @@
         return t;
       };
       const chord = (r, span) => 2 * r * Math.sin(rad(span / 2));
+      this.labels = [];
 
       for (let i = 0; i < 40; i++) {
         const a = ang(i);
@@ -166,7 +170,8 @@
           const fs = Math.min(16, 92 / (name.length * 0.53));
           const [x, y] = polar(R.text, a);
           const rot = Math.cos(rad(a)) >= -0.001 ? a : a + 180;   // на левой половине разворачиваем
-          txt(x, y, name, fs, rot, C.ink, true, 94);
+          const t = txt(x, y, name, fs, rot, C.ink, true, 94);
+          this.labels[i] = { t, x, y, rot, sx: t.scaleX };
         } else {
           // угол: две строки поперёк радиуса, читаются прямо, когда угол внизу или вверху
           const [main, sub] = CORNER[i];
@@ -188,15 +193,20 @@
       for (const k in G.own) {
         const i = Number(k), o = G.own[k], a = ang(i);
         if (o.mortgaged) {
-          // заложенная клетка «вмёрзла»: белёсый налёт и снежинка
+          // заложенная клетка «вмёрзла»: белёсый налёт поверх иконки и крупная снежинка
           const a1 = rad(START[i] + 0.35), a2 = rad(START[i] + SPAN[i] - 0.35);
-          f.fillStyle(0xf4f8fb, 0.72);
+          f.fillStyle(0xeef5fa, 0.78);
           f.beginPath(); f.arc(CX, CY, R.out, a1, a2, false); f.arc(CX, CY, R.inn, a2, a1, true); f.closePath(); f.fillPath();
-          const [sx, sy] = polar(R.inn + 22, a);
-          f.lineStyle(2.2, hex(C.deep), 0.9);
+          const [sx, sy] = polar(R.icon - 2, a);
+          f.lineStyle(2.6, hex(C.deep), 0.95);
           for (let k2 = 0; k2 < 3; k2++) {
-            const t = rad(k2 * 60 + a);
-            f.lineBetween(sx - 8 * Math.cos(t), sy - 8 * Math.sin(t), sx + 8 * Math.cos(t), sy + 8 * Math.sin(t));
+            const t = rad(k2 * 60 + a), cx2 = Math.cos(t), sy2 = Math.sin(t);
+            f.lineBetween(sx - 11 * cx2, sy - 11 * sy2, sx + 11 * cx2, sy + 11 * sy2);
+            for (const e of [-1, 1]) {   // усики на концах лучей
+              const ex = sx + e * 7 * cx2, ey = sy + e * 7 * sy2, t2 = t + e * Math.PI;
+              f.lineBetween(ex, ey, ex + 4 * Math.cos(t2 + 0.7), ey + 4 * Math.sin(t2 + 0.7));
+              f.lineBetween(ex, ey, ex + 4 * Math.cos(t2 - 0.7), ey + 4 * Math.sin(t2 - 0.7));
+            }
           }
         }
         g.lineStyle(8, hex(G.players[o.owner].color), o.mortgaged ? 0.4 : 1);
@@ -207,6 +217,7 @@
           else for (let h = 0; h < n; h++) this.quad(g, a, 318, (h - (n - 1) / 2) * 1.9, 7.5, 7.5, 0xffffff);
         }
       }
+      this.styleLabels(G);
       if (this.prizeLabel) {
         const t = this.prizeLabel;
         t.setScale(1).setText(G.prize ? 'приз ' + root.BAAI.engine.rub(G.prize) : 'приз');
@@ -222,6 +233,41 @@
         hl.arc(CX, CY, R.inn + 2.5, a2, a1, true);
         hl.closePath(); hl.strokePath();
       }
+    }
+
+    // Название заложенной клетки бледнеет, рядом строка «выкуп N ₽»
+    styleLabels(G) {
+      const E = root.BAAI.engine;
+      (this.labels || []).forEach((L, i) => {
+        if (!L) return;
+        const m = !!(G.own[i] && G.own[i].mortgaged);
+        if (L.m === m) return;
+        L.m = m;
+        const dn = [-Math.sin(rad(L.rot)), Math.cos(rad(L.rot))];   // «вниз» для строки текста
+        const sh = m ? -6 : 0;
+        L.t.setPosition(L.x + dn[0] * sh, L.y + dn[1] * sh).setColor(m ? '#8aa3b5' : C.ink);
+        if (m && !L.sub) {
+          L.sub = this.add.text(0, 0, '', { fontFamily: FONT, fontSize: '12px', fontStyle: 'bold', color: C.deep })
+            .setOrigin(0.5).setAngle(L.rot).setResolution(3).setDepth(1);
+        }
+        if (L.sub) {
+          L.sub.setVisible(m);
+          if (m) {
+            L.sub.setScale(1).setText('выкуп ' + E.rub(E.unmortgageCost(i)));
+            if (L.sub.width > 90) L.sub.setScale(90 / L.sub.width);
+            L.sub.setPosition(L.x + dn[0] * 9, L.y + dn[1] * 9);
+          }
+        }
+      });
+    }
+
+    // золотая рамка вокруг клеток, где можно строить
+    mark(cells) {
+      const g = this.marks; g.clear();
+      (cells || []).forEach(i => {
+        g.lineStyle(6, hex(C.gold), 1); this.sector(g, i); g.strokePath();
+        g.fillStyle(hex(C.gold), 0.22); this.sector(g, i); g.fillPath();
+      });
     }
 
     // Прямоугольник на кольце: центр на угле a (+ сдвиг da градусов), радиус r
@@ -425,18 +471,14 @@
     setupInput() {
       const cam = this.cameras.main;
       const p1 = this.input.pointer1, p2 = this.input.pointer2;
-      let down = null, pinch = null;
-      const dist = () => Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
+      let down = null;
+      // щипок двумя пальцами ведёт BoardView по событиям касания (this.pinching), здесь только один палец
       this.input.on('pointerdown', p => {
-        if (p1.isDown && p2.isDown) { pinch = { d: dist(), z: cam.zoom }; down = null; if (this.camTween) this.camTween.stop(); }
-        else down = { x: p.x, y: p.y, moved: false, mid: cam.midPoint.clone() };
+        if (this.pinching || (p1.isDown && p2.isDown)) { down = null; return; }
+        down = { x: p.x, y: p.y, moved: false, mid: cam.midPoint.clone() };
       });
       this.input.on('pointermove', p => {
-        if (pinch && p1.isDown && p2.isDown) {
-          cam.setZoom(Phaser.Math.Clamp(pinch.z * dist() / pinch.d, BASE, BASE * 3.2));
-          this.clampCam();
-          return;
-        }
+        if (this.pinching) { down = null; return; }
         if (!down || !p.isDown) return;
         const dx = p.x - down.x, dy = p.y - down.y;
         if (!down.moved && Math.hypot(dx, dy) < 10) return;
@@ -449,7 +491,7 @@
         this.clampCam();
       });
       this.input.on('pointerup', p => {
-        if (pinch) { if (!p1.isDown && !p2.isDown) pinch = null; return; }
+        if (this.pinching) { down = null; return; }
         if (down && !down.moved) this.tap(p);
         down = null;
       });
@@ -459,7 +501,29 @@
       });
     }
 
+    // Щипок: точка поля под пальцами остаётся под пальцами
+    pinchStart(x, y) {
+      const cam = this.cameras.main;
+      if (this.camTween) this.camTween.stop();
+      cam.preRender();
+      this.pinching = { z: cam.zoom, w: cam.getWorldPoint(x, y) };
+    }
+    pinchMove(k, x, y) {
+      const P = this.pinching; if (!P) return;
+      const cam = this.cameras.main;
+      cam.setZoom(Phaser.Math.Clamp(P.z * k, BASE, BASE * 3.2));
+      cam.preRender();
+      const w = cam.getWorldPoint(x, y), m = cam.midPoint;
+      cam.centerOn(m.x + P.w.x - w.x, m.y + P.w.y - w.y);
+      this.clampCam();
+    }
+    pinchEnd() { this.pinching = null; }
+
     tap(p) {
+      // одно касание может прийти дважды (касание и мышь) — второе не считаем
+      const now = Date.now();
+      if (now - (this.lastTap || 0) < 400) return;
+      this.lastTap = now;
       const w = this.cameras.main.getWorldPoint(p.x, p.y);
       const dx = w.x - CX, dy = w.y - CY, r = Math.hypot(dx, dy);
       if (r < R.inn - 50 || r > R.out + 4) return;     // клетка или фишки перед ней
@@ -520,9 +584,49 @@
         banner: false, audio: { noAudio: true },
         scene: this.scene,
       });
+      this.pinchTouch(inner);
       // поворот экрана, клавиатура, панель браузера — пересчитать размер холста
       if (window.ResizeObserver) new ResizeObserver(() => this.game.scale && this.game.scale.refresh()).observe(inner);
     }
+    // Два пальца на поле всегда приближают поле, а не страницу (Яндекс Браузер, Chrome, Safari).
+    // Ловим касания сами и не отдаём их браузеру; один палец по-прежнему листает страницу.
+    pinchTouch(el) {
+      let d0 = 0;
+      const two = e => e.touches.length >= 2;
+      const pts = e => {
+        const sc = this.game.scale, a = e.touches[0], b = e.touches[1];
+        const ax = sc.transformX(a.pageX), ay = sc.transformY(a.pageY), bx = sc.transformX(b.pageX), by = sc.transformY(b.pageY);
+        return { d: Math.hypot(ax - bx, ay - by) || 1, x: (ax + bx) / 2, y: (ay + by) / 2 };
+      };
+      const start = e => {
+        if (!two(e) || !this.scene.layer) return;
+        if (e.cancelable) e.preventDefault();
+        const p = pts(e); d0 = p.d;
+        this.scene.pinchStart(p.x, p.y);
+      };
+      const move = e => {
+        if (!this.scene.pinching) return;
+        if (e.cancelable) e.preventDefault();
+        if (!two(e)) return;
+        const p = pts(e);
+        this.scene.pinchMove(p.d / d0, p.x, p.y);
+      };
+      const end = e => {
+        if (!this.scene.pinching) return;
+        if (e.cancelable) e.preventDefault();
+        if (two(e)) { const p = pts(e); d0 = p.d; this.scene.pinchStart(p.x, p.y); return; }
+        // последний палец отпущен — только тогда снова можно тапать и листать
+        if (!e.touches.length) setTimeout(() => this.scene.pinchEnd(), 50);
+      };
+      el.addEventListener('touchstart', start, { passive: false });
+      el.addEventListener('touchmove', move, { passive: false });
+      el.addEventListener('touchend', end, { passive: false });
+      el.addEventListener('touchcancel', end, { passive: false });
+      // жест-зум страницы в Safari
+      el.addEventListener('gesturestart', e => e.preventDefault());
+    }
+    // Подсветить клетки (где можно строить); пустой список — убрать
+    mark(cells) { if (this.scene.layer) this.scene.mark(cells); else this.pendingMark = cells; }
     setZoomed(z) { this.el.classList.toggle('zoomed', z); }
     update(G, opts) {
       const s = this.scene;
