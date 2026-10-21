@@ -2772,7 +2772,7 @@ body {
   const W = 720, CX = 360, CY = 360;
   const CANVAS = 1080, BASE = CANVAS / W;
   // клетка от inn до out; у внутреннего края — полоса владельца; дальше к центру тёмное кольцо (dots) и белый круг
-  const R = { rimOut: 356, out: 330, band: 306, icon: 292, text: 228, own: 161, ownW: 19, flake: 318, inn: 150, dots: 142, center: 134 };
+  const R = { rimOut: 356, out: 330, band: 306, icon: 292, text: 228, ownW: 21, flake: 318, inn: 150, dots: 142, center: 134 };
 
   // Угловые клетки вдвое шире обычных
   const SC = 16, SN = (360 - 4 * SC) / 36;
@@ -2930,7 +2930,7 @@ body {
           const [x, y] = polar(R.text, a);
           const rot = Math.cos(rad(a)) >= -0.001 ? a : a + 180;   // на левой половине разворачиваем
           const t = txt(x, y, name, fs, rot, C.ink, true, 104);
-          this.labels[i] = { t, x, y, rot, sx: t.scaleX };
+          this.labels[i] = { t, x, y, rot, a, fs, sx: t.scaleX };
         } else {
           // угол: две строки поперёк радиуса, читаются прямо, когда угол внизу или вверху
           const [main, sub] = CORNER[i];
@@ -2959,9 +2959,12 @@ body {
           // снежинка — на цветной полоске группы у внешнего края (у клеток без полоски — там же)
           this.snowflake(f, ...polar(R.flake, a), a);
         }
-        // полоса владельца: широкая, заходит на тёмное кольцо к центру
-        g.lineStyle(R.ownW, hex(G.players[o.owner].color), o.mortgaged ? 0.4 : 1);
-        g.beginPath(); g.arc(CX, CY, R.own, rad(START[i] + 0.6), rad(START[i] + SPAN[i] - 0.6), false); g.strokePath();
+        // полоса владельца: заливает низ клетки целиком — до тёмного кольца и до боковых стенок
+        g.fillStyle(hex(G.players[o.owner].color), o.mortgaged ? 0.4 : 1);
+        g.beginPath();
+        g.arc(CX, CY, R.inn + R.ownW, rad(START[i] + 0.35), rad(START[i] + SPAN[i] - 0.35), false);
+        g.arc(CX, CY, R.inn, rad(START[i] + SPAN[i] - 0.35), rad(START[i] + 0.35), true);
+        g.closePath(); g.fillPath();
         if (BOARD[i].type === 'prop' && o.houses) {
           const n = o.houses;
           if (n === 5) this.balagan(g, a, R.flake);
@@ -2994,19 +2997,22 @@ body {
         const m = !!(G.own[i] && G.own[i].mortgaged);
         if (L.m === m) return;
         L.m = m;
+        // заложенная: две строки помельче и чуть ближе к внешнему краю, где клетка шире — не касаются стенок
         const dn = [-Math.sin(rad(L.rot)), Math.cos(rad(L.rot))];   // «вниз» для строки текста
-        const sh = m ? -7 : 0;
-        L.t.setPosition(L.x + dn[0] * sh, L.y + dn[1] * sh).setColor(m ? '#8aa3b5' : C.ink);
+        const [bx, by] = m ? polar(R.text + 10, L.a) : [L.x, L.y];
+        const sh = m ? -6 : 0;
+        L.t.setScale(m ? Math.min(L.sx, 13.5 / L.fs, 76 / L.t.width) : L.sx);
+        L.t.setPosition(bx + dn[0] * sh, by + dn[1] * sh).setColor(m ? '#8aa3b5' : C.ink);
         if (m && !L.sub) {
-          L.sub = this.add.text(0, 0, '', { fontFamily: FONT, fontSize: '12px', fontStyle: 'bold', color: C.deep })
+          L.sub = this.add.text(0, 0, '', { fontFamily: FONT, fontSize: '10.5px', fontStyle: 'bold', color: C.deep })
             .setOrigin(0.5).setAngle(L.rot).setResolution(3).setDepth(1);
         }
         if (L.sub) {
           L.sub.setVisible(m);
           if (m) {
             L.sub.setScale(1).setText('выкуп ' + E.rub(E.unmortgageCost(i)));
-            if (L.sub.width > 96) L.sub.setScale(96 / L.sub.width);
-            L.sub.setPosition(L.x + dn[0] * 10, L.y + dn[1] * 10);
+            if (L.sub.width > 76) L.sub.setScale(76 / L.sub.width);
+            L.sub.setPosition(bx + dn[0] * 7, by + dn[1] * 7);
           }
         }
       });
