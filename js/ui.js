@@ -52,6 +52,8 @@
   let lastSnap = null; // что было на экране в прошлый раз — по разнице играем звуки и анимации
   let heldMoney = null; // пока фишка идёт, на плашках старые суммы
   let lastTick = -1;
+  let shownRent = 0;   // какую плашку аренды уже показали
+  let rentT = 0;
 
   // ---------- сохранение ----------
   const store = {
@@ -153,6 +155,8 @@
     }).join('');
     $('time-seg').innerHTML = [[0, 'Нет'], [30, '30 мин'], [60, '60 мин'], [90, '90 мин']].map(([m, t]) =>
       `<button type="button" role="radio" aria-checked="${m === setup.minutes}" data-m="${m}">${t}</button>`).join('');
+    $('hints-seg').innerHTML = [[true, 'Показывать'], [false, 'Не нужно']].map(([v, t]) =>
+      `<button type="button" role="radio" aria-checked="${v === hintsOn}" data-h="${v}">${t}</button>`).join('');
     let html = '';
     for (let i = 0; i < setup.count; i++) {
       const v = setup.names[i] || `Игрок ${i + 1}`;
@@ -210,6 +214,7 @@
     for (let i = 0; i < setup.count; i++) players.push({ name: setup.names[i] || `Игрок ${i + 1}`, color: T.PLAYER[i], figure: setup.figures[i] });
     botNames().forEach((name, k) => { const i = setup.count + k; players.push({ name, color: T.PLAYER[i], figure: setup.figures[i], bot: true }); });
     G = E.create(players, { minutes: setup.minutes, rules: setup.rules });
+    hintsSeen.clear(); shownRent = 0;
     G.log.push(`— Ход: ${G.players[0].name}`);
     shownCard = 0;
     holder = G.phase === 'roles' && humans() > 1 ? null : 0;
@@ -317,6 +322,7 @@
     return `Построить ${hotel ? 'отель' : 'дом'} · ${rub(E.houseCost(G, c.group, p))}`;
   };
   const sellWord = i => `Продать ${G.own[i].houses === 5 ? 'отель' : 'дом'} · ${rub(E.sellValue(i, G))}`;
+  let glowBuild = false;          // подсветить кнопку «Строить» (после «Группа собрана!»)
   let buildMode = false;          // режим «Строить»: на поле подсвечены клетки, нажатие ставит дом
   const buildHinted = new Set();  // кому уже показали «Группа собрана»
   function syncMarks() {
@@ -336,7 +342,7 @@
     const canTrade = G.phase === 'roll' || G.phase === 'end';
     const canLoan = ['roll', 'end', 'debt', 'buy'].includes(G.phase);
     const parts = [];
-    if (buildable(G.turn).length) parts.push(btn(`${icon('house', 'currentColor', 2.2)}Строить`, 'buildMode', 'sm ic gold'));
+    if (buildable(G.turn).length) parts.push(btn(`${icon('house', 'currentColor', 2.2)}Строить`, 'buildMode', `sm ic gold${glowBuild ? ' glow' : ''}`));
     if (canTrade) parts.push(btn(`${icon('swap', 'currentColor', 2.2)}Обмен`, 'tradeOpen', 'sm ic'));
     if (canLoan) parts.push(btn(`${icon('card', 'currentColor', 2.2)}${pl.loan ? 'Кредит · ' + rub(pl.loan.owe) : 'Кредит'}`, 'loanOpen', 'sm ic'));
     return parts.length ? `<div class="act-row side">${parts.join('')}</div>` : '';
@@ -418,7 +424,9 @@
   function renderActions() {
     const pl = G.players[G.turn];
     let h = '';
+    glowBuild = false;
     if (G.phase !== 'over' && !myMove()) {
+      hintNow = null;
       $('actions').innerHTML = waitHTML();
       tickLeft();
       return;
@@ -475,13 +483,90 @@
     }
     if (calmPhase() && !pl.bankrupt && !buildHinted.has(G.turn) && buildable(G.turn).length) {
       const g = GROUPS[BOARD[buildable(G.turn)[0]].group];
-      h = `<div class="notice build"><b>Группа «${esc(g.name)}» собрана!</b> Теперь на её клетках можно строить дома — аренда вырастет в разы.
-        <div class="act-row">${btn('Строить', 'buildMode', 'primary')}${btn('Позже', 'buildLater', 'ghost')}</div></div>` + h;
+      glowBuild = true;
+      h = `<div class="notice build"><b>Группа «${esc(g.name)}» собрана!</b> Теперь на её клетках можно строить дома — аренда вырастет в разы. Нажмите кнопку <b>«Строить»</b> внизу ↓
+        <div class="act-row">${btn('Понятно', 'buildLater', 'ghost sm')}</div></div>` + h;
     }
+    if (!glowBuild) h = hintHTML() + h;   // «Группа собрана!» сама и есть подсказка
     if (['roll', 'end'].includes(G.phase) && !pl.bankrupt) h += abilityBtn();
     if (G.phase !== 'over' && !pl.bankrupt && !['auction', 'offer', 'roles', 'omen', 'pick2'].includes(G.phase)) h += sideRow(pl);
     $('actions').innerHTML = h;
     tickLeft();
+  }
+
+  // ----- подсказки для новичка -----
+  // Показываются один раз за партию, когда ситуация встречается впервые.
+  // У каждого телефона свои; на одном телефоне — у каждого человека свои.
+  let hintsOn = store.get('baai.hints') !== false;
+  let hintsSeen = new Set();
+  let hintNow = null;
+  function setHints(on) { hintsOn = on; store.set('baai.hints', on); }
+  const HINTS = {
+    role: 'Тайная роль: у каждой есть плюс, минус и способность «раз за игру». Вашу роль видите только вы, пока она не сработает.',
+    roll: 'Нажмите «Бросить кубики» — фишка пройдёт столько клеток, сколько выпало. Дубль даёт ещё бросок, три дубля подряд уносят в зимовьё.',
+    buy: 'Клетка свободна. Купите её — и каждый, кто на неё встанет, заплатит вам аренду. Откажетесь — клетка уйдёт на аукцион, и торговаться сможете вы тоже.',
+    auction: 'Аукцион: ставки идут по кругу. «Пас» — выйти из торгов. Клетку получает последний, кто остался.',
+    sealed: 'Тайный аукцион: каждый один раз пишет ставку, чужих ставок никто не видит. Покупает тот, кто дал больше.',
+    rent: 'Вы заплатили аренду хозяину клетки. Соберите все клетки одного цвета — ваша аренда удвоится, а с домами вырастет в разы.',
+    card: 'Карточки: «Байанай» — перемещения, удача и неудача, «Тюсюлгэ» — деньги и события. «Попутный вездеход» можно хранить до нужного момента.',
+    tax: 'Налоги копятся в Приз Ысыаха — сумма видна вверху. Кто встанет на клетку «Ысыах», заберёт всё.',
+    jail: 'Вы в зимовье. Выбросьте дубль — пурга стихнет (3 попытки), или вызовите вездеход за 50 ₽. После третьей неудачи вездеход обязателен.',
+    debt: 'Денег не хватает. В «Имуществе» ниже можно продать дома и заложить клетки за полцены, а кнопка «Кредит» даст денег в долг. Если не набрать — банкротство.',
+    offer: 'Вам предлагают сделку. Сравните, что получаете и что отдаёте. Соглашаться не обязательно.',
+    end: 'Ход сделан. Пока не нажали «Завершить ход», можно меняться, брать кредит и строить дома.',
+  };
+  function hintKey() {
+    const p = me(), pl = G.players[p];
+    if (!pl || pl.bot || pl.bankrupt || E.actor(G) !== p) return null;
+    switch (G.phase) {
+      case 'roles': return 'role';
+      case 'offer': return 'offer';
+      case 'auction': return G.auction.sealed ? 'sealed' : 'auction';
+      case 'buy': return 'buy';
+      case 'debt': return 'debt';
+      case 'roll': return pl.inJail ? 'jail' : 'roll';
+      case 'end': {
+        const R = G.rentNote;
+        if (R && R.payer === p && R.amount > 0 && R.cell === pl.pos) return 'rent';
+        if (G.card && G.card.player === p) return 'card';
+        if (BOARD[pl.pos].type === 'tax' && G.rules.prize !== 'off') return 'tax';
+        return 'end';
+      }
+    }
+    return null;
+  }
+  function hintHTML() {
+    const was = hintNow;
+    hintNow = null;
+    if (!hintsOn || G.phase === 'over' || buildMode) return '';
+    let k = hintKey();
+    const id = k && `${me()}:${k}`;
+    if (was && was !== id) hintsSeen.add(was);   // ситуация прошла — больше не показываем
+    if (!k || hintsSeen.has(id)) return '';
+    hintNow = id;
+    return `<div class="notice tip"><span class="tip-h">Подсказка</span><p>${esc(HINTS[k])}</p>
+      <div class="act-row">${btn('Понятно', 'hintOk', 'sm')}${btn('Больше не показывать', 'hintOff', 'sm ghost')}</div></div>`;
+  }
+
+  // ----- плашка аренды -----
+  function rentText(R) {
+    const p = me(), c = BOARD[R.cell], ow = G.players[R.owner], payer = G.players[R.payer];
+    if (!R.amount) return { head: `${c.name} в залоге — аренды нет`, sub: `хозяин ${ow.name}` };
+    const head = R.payer === p ? `Вы платите ${rub(R.amount)} → ${ow.name}`
+      : R.owner === p ? `${payer.name} платит вам ${rub(R.amount)}`
+      : `${payer.name} платит ${rub(R.amount)} → ${ow.name}`;
+    return { head, sub: [c.name].concat(R.why || []).join(' · ') };
+  }
+  function showRent(R) {
+    const el = $('rentbar');
+    if (!el || !G) return;
+    const t = rentText(R), ow = G.players[R.owner];
+    el.style.setProperty('--gc', cellColor(BOARD[R.cell]));
+    el.className = 'rentbar' + (R.payer === me() && R.amount ? ' mine' : '') + (R.amount ? '' : ' free');
+    el.innerHTML = `${token(ow, 34)}<div><b>${esc(t.head)}</b><span>${esc(t.sub)}</span></div>`;
+    el.hidden = false;
+    clearTimeout(rentT);
+    rentT = setTimeout(() => { el.hidden = true; }, 5000);
   }
 
   // Сколько секунд осталось на ставку или ответ
@@ -602,6 +687,12 @@
       playNow(ev, opts);
       if (opts.rolled && ev.money.length) heldMoney = prev.money;
       settled.push(() => { if (heldMoney) { heldMoney = null; renderPlayers(); } playSettled(ev); });
+    }
+    // плашка аренды — когда фишка дошла до чужой клетки
+    const R = G.rentNote;
+    if (R && R.seq > shownRent) {
+      shownRent = R.seq;
+      if (prev) settled.push(() => showRent(R));
     }
     // новую карточку показываем, когда фишка дошла до клетки
     if (G.card && G.card.seq > shownCard) {
@@ -935,6 +1026,7 @@
       ${btn('Правила кратко', 'rules')}
       <div class="toggles">${btn(`${icon(FX.sound ? 'sound' : 'mute', 'currentColor', 2.2)}${FX.sound ? 'Звук включён' : 'Звук выключен'}`, 'fxSound', 'sm ic', false, `aria-pressed="${FX.sound}"`)}
       ${FX.canVibe ? btn(`${icon('vibe', 'currentColor', 2.2)}${FX.vibe ? 'Вибрация включена' : 'Вибрация выключена'}`, 'fxVibe', 'sm ic', false, `aria-pressed="${FX.vibe}"`) : ''}</div>
+      ${btn(hintsOn ? 'Подсказки для новичка: вкл' : 'Подсказки для новичка: выкл', 'hintsToggle', 'sm', false, `aria-pressed="${hintsOn}"`)}
       ${G && G.players.some(p => p.bot) && !NET.isClient() ? btn(`${icon('sled', 'currentColor', 2.2)}${botFast ? 'Боты ходят быстро' : 'Боты ходят обычно'}`, 'botSpeed', 'sm ic', false, `aria-pressed="${botFast}"`) : ''}
       ${NET.isHost() ? btn('QR для подключения', 'showQr') : ''}
       ${NET.isClient() ? '' : btn('Новая партия', 'askNew')}
@@ -1115,7 +1207,7 @@
       case 'newGame':
         clearTimeout(botT);
         if (netGame()) { G = null; closeSheet(); NET.backToLobby(); return; }
-        G = null; buildMode = false; buildHinted.clear(); store.set(SAVE_KEY, null); showSetup(); return;
+        G = null; buildMode = false; buildHinted.clear(); hintsSeen.clear(); store.set(SAVE_KEY, null); showSetup(); return;
 
       // обмен
       case 'tradeOpen':
@@ -1153,6 +1245,9 @@
       case 'buildMode': buildMode = true; buildHinted.add(G.turn); closeSheet(); render({}); return;
       case 'buildDone': buildMode = false; render({}); return;
       case 'buildLater': buildHinted.add(G.turn); render({}); return;
+      case 'hintOk': if (hintNow) hintsSeen.add(hintNow); hintNow = null; render({}); return;
+      case 'hintOff': setHints(false); hintNow = null; render({}); toast('Подсказки выключены. Включить — в меню.'); return;
+      case 'hintsToggle': setHints(!hintsOn); showMenu(); if (G) renderActions(); return;
       case 'bid': send('bid', { amount: num('amount') }); return;
       case 'roleShow': showRole(num('p')); return;
       case 'pickRole': send('pickRole', { role: t.dataset.role }); return;
@@ -1197,6 +1292,7 @@
     $('btn-menu').addEventListener('click', showMenu);
     $('btn-all').addEventListener('click', () => board && board.showAll());
     $('prize').addEventListener('click', () => showCell(20));
+    $('rentbar').addEventListener('click', () => { clearTimeout(rentT); $('rentbar').hidden = true; });
     $('btn-start').addEventListener('click', startGame);
     $('btn-resume').addEventListener('click', () => { G = E.migrate(store.get(SAVE_KEY)); holder = null; if (G) { shownCard = G.card ? G.card.seq : 0; showGame(true); } });
     $('count-seg').addEventListener('click', e => {
@@ -1206,6 +1302,10 @@
     $('bots-seg').addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b || b.disabled) return;
       readNames(); setup.bots = Number(b.dataset.b); fixCounts('bots'); renderSetup();
+    });
+    $('hints-seg').addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      readNames(); setHints(b.dataset.h === 'true'); renderSetup();
     });
     $('time-seg').addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;

@@ -189,6 +189,31 @@
     return 0;
   }
 
+  // Откуда взялась аренда — для плашки «Платите …». Минусы и плюсы тайных ролей
+  // называем, только если роль уже раскрыта.
+  function rentWhy(s, i, opts = {}) {
+    const c = BOARD[i], o = s.own[i], ow = s.players[o.owner], why = [];
+    const shown = id => ow.role === id && ow.roleShown;
+    if (c.type === 'prop') {
+      if (o.houses === 5) why.push('отель');
+      else if (o.houses > 0) why.push(o.houses === 1 ? '1 дом' : `${o.houses} дома`);
+      else if (ownsGroup(s, o.owner, c.group)) why.push('вся группа ×2');
+      else why.push('без домов');
+      if (o.houses === 0 && shown('toyon')) why.push('Тойон −10%');
+    } else if (c.type === 'transport') {
+      const n = countOwned(s, o.owner, 'transport');
+      why.push(n === 1 ? 'транспорт: 1 у владельца' : `транспорт: ${n} у владельца`);
+      if (opts.mult === 2) why.push('по карточке ×2');
+      if (shown('kayur')) why.push('Каюр ×1,5');
+    } else if (c.type === 'utility') {
+      const sum = opts.diceSum || (s.dice ? s.dice[0] + s.dice[1] : 7);
+      const mult = opts.force10 ? 10 : RULES.utilityMult[countOwned(s, o.owner, 'utility')];
+      why.push(`кубики ${sum} × ${mult}${opts.force10 ? ' по карточке' : ''}`);
+    }
+    if (s.grow > 1) why.push(`цены +${Math.round((s.grow - 1) * 100)}%`);
+    return why;
+  }
+
   // ---------- залог ----------
   const mortgageValue = i => Math.floor(BOARD[i].price * RULES.mortgageRate);
   const mortgageFee = i => Math.ceil(mortgageValue(i) * RULES.mortgageFee);
@@ -423,10 +448,16 @@
         const o = s.own[i];
         if (!o) { s.pending = { kind: 'buy', cell: i }; s.phase = 'buy'; return; }
         if (o.owner === p) return;
-        if (o.mortgaged) { log(s, `${c.name} в залоге — аренда не берётся`); return; }
+        if (o.mortgaged) {
+          log(s, `${c.name} в залоге — аренда не берётся`);
+          s.rentNote = { seq: (s.rentNote ? s.rentNote.seq : 0) + 1, payer: p, owner: o.owner, cell: i, amount: 0, why: ['в залоге — аренды нет'] };
+          return;
+        }
         let rent = rentFor(s, i, opts);
         const ow = s.players[o.owner];
-        if (ow.trap && !ow.bankrupt) { ow.trap = false; rent *= 2; reveal(s, o.owner, `засада — аренда вдвойне, ${rub(rent)}`); }
+        const why = rentWhy(s, i, opts);
+        if (ow.trap && !ow.bankrupt) { ow.trap = false; rent *= 2; why.push('засада ×2'); reveal(s, o.owner, `засада — аренда вдвойне, ${rub(rent)}`); }
+        s.rentNote = { seq: (s.rentNote ? s.rentNote.seq : 0) + 1, payer: p, owner: o.owner, cell: i, amount: rent, why };
         charge(s, p, o.owner, rent, `аренда: ${c.name} → ${s.players[o.owner].name}`);
         return;
       }
