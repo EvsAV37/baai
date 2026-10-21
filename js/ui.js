@@ -60,7 +60,86 @@
     get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
     set(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* без сохранения */ } },
   };
-  const save = () => { if (!netGame()) store.set(SAVE_KEY, G); };
+  // Пять ячеек сохранения (только на одном телефоне). В каждой — партия и её описание для списка.
+  // Текущая партия сама сохраняется в свою ячейку после каждого действия.
+  const SLOTS_KEY = 'baai.slots.v1', SLOT_N = 5;
+  const slotKey = k => 'baai.slot.' + k;
+  let curSlot = -1;
+  function slots() {
+    const m = store.get(SLOTS_KEY);
+    return Array.isArray(m) && m.length === SLOT_N ? m : Array(SLOT_N).fill(null);
+  }
+  function slotMeta(g, old) {
+    let name = old && old.name;
+    if (!name) { const n = (Number(store.get('baai.slotn')) || 0) + 1; store.set('baai.slotn', n); name = `Партия ${n}`; }
+    return {
+      name, date: Date.now(), round: g.round || 0,
+      players: g.players.map(p => ({ name: p.name, figure: p.figure, color: p.color, bot: !!p.bot })),
+      over: g.phase === 'over', winner: g.phase === 'over' && g.winner !== null ? g.players[g.winner].name : '',
+    };
+  }
+  function save() {
+    if (netGame() || !G || curSlot < 0) return;
+    store.set(slotKey(curSlot), G);
+    const m = slots(); m[curSlot] = slotMeta(G, m[curSlot]); store.set(SLOTS_KEY, m);
+  }
+  // Сохранение прошлой версии (одна партия) переезжает в первую свободную ячейку
+  function migrateSave() {
+    const old = store.get(SAVE_KEY);
+    if (!old || !old.players) return;
+    const m = slots(), k = m.findIndex(x => !x);
+    if (k < 0) return;
+    store.set(slotKey(k), old);
+    m[k] = slotMeta(old, null); store.set(SLOTS_KEY, m);
+    store.set(SAVE_KEY, null);
+  }
+  const slotDate = d => new Date(d).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  function slotsHTML() {
+    const m = slots();
+    if (!m.some(Boolean)) return '';
+    return `<h2 class="h2">Сохранённые партии</h2><div class="slots">${m.map((x, k) => !x ? '' : `
+      <div class="slot${x.over ? ' over' : ''}">
+        <div class="slot-figs" aria-hidden="true">${x.players.map(p => T.tokenSVG(p.figure, p.color, 26)).join('')}</div>
+        <div class="slot-tx"><b>${esc(x.name)}</b>
+          <span>${esc(slotDate(x.date))} · ${x.over ? `окончена${x.winner ? ', победил ' + esc(x.winner) : ''}` : `круг ${x.round + 1}`}</span>
+          <span>${x.players.map(p => esc(p.name) + (p.bot ? ' (бот)' : '')).join(', ')}</span></div>
+        <div class="slot-btns">${btn(x.over ? 'Открыть' : 'Продолжить', 'slotLoad', 'primary sm', false, `data-k="${k}"`)}
+          ${btn('✎', 'slotRename', 'sm', false, `data-k="${k}" aria-label="Переименовать ${esc(x.name)}"`)}
+          ${btn('✕', 'slotDel', 'sm', false, `data-k="${k}" aria-label="Удалить ${esc(x.name)}"`)}</div>
+      </div>`).join('')}</div>`;
+  }
+  function loadSlot(k) {
+    const g = store.get(slotKey(k));
+    if (!g || !g.players) { const m = slots(); m[k] = null; store.set(SLOTS_KEY, m); renderSetup(); toast('Сохранение повреждено'); return; }
+    G = E.migrate(g); curSlot = k; holder = null; undo = []; tradeSnap = null;
+    buildMode = false; buildHinted.clear(); hintsSeen.clear();
+    shownCard = G.card ? G.card.seq : 0; shownRent = G.rentNote ? G.rentNote.seq : 0;
+    showGame(true);
+    if (G.phase === 'over') setTimeout(showVictory, 300);   // окончена — сразу итоги
+    else maybeHandoff();
+  }
+
+  // ---------- отмена «↶» (только на одном телефоне) ----------
+  // Перед покупкой, стройкой, залогом и обменом запоминаем копию партии.
+  // Бросок, карточка, аукцион и передача хода стирают историю.
+  let undo = [];          // [{ g: копия партии до действия, label, turn }]
+  let tradeSnap = null;   // копия до предложения обмена — пригодится, если обмен примут
+  const canUndo = () => !netGame() && G && undo.length && undo[undo.length - 1].turn === G.turn && !isBot(G.turn)
+    && ['roll', 'end', 'buy', 'debt'].includes(G.phase) && !G.players[G.turn].bankrupt;
+  function doUndo() {
+    if (!canUndo()) return;
+    const u = undo.pop(), seq = G.seq;
+    G = E.migrate(JSON.parse(u.g));
+    G.seq = seq + 1;
+    G.log.push(`↶ Отменено — ${u.label}`);
+    lastSnap = snap(G);      // без звуков и летящих монет
+    buildMode = false; trade = null;
+    holder = G.turn;
+    save();
+    closeSheet();
+    render({});
+    toast(`Отменено — ${u.label}`);
+  }
 
   // ---------- правила партии ----------
   const RULE_UI = [
@@ -167,7 +246,9 @@
       </div>`;
     }
     $('names').innerHTML = html;
-    $('resume-box').hidden = !store.get(SAVE_KEY);
+    const sl = slotsHTML();
+    $('resume-box').innerHTML = sl;
+    $('resume-box').hidden = !sl;
     $('net-box').hidden = !NET.canHost;
     $('btn-net-resume').hidden = !NET.hasSave();
   }
@@ -207,8 +288,23 @@
     setup.figures[i] = ids[k];
   }
 
-  function startGame() {
+  // Новая партия занимает свободную ячейку; если все заняты — спрашиваем, какую заменить
+  function startGame(slot) {
     readNames();
+    if (slot === undefined) {
+      const m = slots(), free = m.findIndex(x => !x);
+      if (free < 0) {
+        openKind('ask', `<h3>Все ${SLOT_N} ячеек заняты</h3><p>Какую партию заменить новой?</p>
+          <div class="slot-pick">${m.map((x, k) => btn(`<b>${esc(x.name)}</b><span>${x.over ? 'окончена' : 'круг ' + (x.round + 1)} · ${esc(slotDate(x.date))}</span>`, 'slotNew', 'slot-choice', false, `data-k="${k}"`)).join('')}</div>
+          ${btn('Отмена', 'close', 'ghost')}`);
+        return;
+      }
+      slot = free;
+    }
+    closeSheet();
+    store.set(slotKey(slot), null);
+    const m = slots(); m[slot] = null; store.set(SLOTS_KEY, m);
+    curSlot = slot; undo = []; tradeSnap = null;
     store.set(SETUP_KEY, setup);
     const players = [];
     for (let i = 0; i < setup.count; i++) players.push({ name: setup.names[i] || `Игрок ${i + 1}`, color: T.PLAYER[i], figure: setup.figures[i] });
@@ -342,6 +438,7 @@
     const canTrade = G.phase === 'roll' || G.phase === 'end';
     const canLoan = ['roll', 'end', 'debt', 'buy'].includes(G.phase);
     const parts = [];
+    if (canUndo()) parts.push(btn('<span class="u" aria-hidden="true">↶</span>Отменить', 'undo', 'sm ic undo', false, `aria-label="Отменить: ${esc(undo[undo.length - 1].label)}"`));
     if (buildable(G.turn).length) parts.push(btn(`${icon('house', 'currentColor', 2.2)}Строить`, 'buildMode', `sm ic gold${glowBuild ? ' glow' : ''}`));
     if (canTrade) parts.push(btn(`${icon('swap', 'currentColor', 2.2)}Обмен`, 'tradeOpen', 'sm ic'));
     if (canLoan) parts.push(btn(`${icon('card', 'currentColor', 2.2)}${pl.loan ? 'Кредит · ' + rub(pl.loan.owe) : 'Кредит'}`, 'loanOpen', 'sm ic'));
@@ -802,6 +899,26 @@
     if (ev.over) { FX.beads(); setTimeout(showVictory, 700); }
   }
 
+  // Итоги партии: кто сколько заработал на аренде, налоги, приз, покупки; самая доходная клетка
+  function statsHTML(rank) {
+    const S = E.summary(G);
+    const row = (t, v, cls) => `<div class="st-row${cls ? ' ' + cls : ''}"><span>${t}</span><b>${v}</b></div>`;
+    const best = S.best ? `<p class="best">${icon(cellIcon(S.best.cell), cellColor(BOARD[S.best.cell]), 2.2)}<span>Самая доходная клетка: <b>${esc(BOARD[S.best.cell].name)}</b> — ${rub(S.best.amount)} аренды${S.best.owner !== null && S.best.owner >= 0 ? ` · владелец ${esc(G.players[S.best.owner].name)}` : ''}</span></p>` : '';
+    return `<h4 class="st-head">Итоги партии</h4>${best}<div class="stats">${rank.map(r => {
+      const q = S.players[r.i] || {};
+      const rows = [
+        row('Получил аренды', q.rentIn ? '+' + rub(q.rentIn) : rub(0), 'plus'),
+        row('Заплатил аренды', q.rentOut ? '−' + rub(q.rentOut) : rub(0), 'minus'),
+        q.tax ? row('Налоги', '−' + rub(q.tax), 'minus') : '',
+        q.prize ? row('Приз Ысыаха', '+' + rub(q.prize), 'plus') : '',
+        row('Куплено клеток', String(q.bought || 0)),
+        q.auctions ? row('из них на аукционе', String(q.auctions)) : '',
+        q.spent ? row('Потратил на клетки', rub(q.spent)) : '',
+      ].join('');
+      return `<div class="st-card">${token(r.p, 28)}<b class="st-nm">${esc(r.p.name)}</b>${rows}</div>`;
+    }).join('')}</div>`;
+  }
+
   function showVictory() {
     if (!G || G.phase !== 'over') return;
     const w = G.players[G.winner];
@@ -813,6 +930,7 @@
       <ol class="rank">${rank.map(r => `<li class="${r.i === G.winner ? 'win' : ''}">${token(r.p, 30)}<span>${esc(r.p.name)}</span>
         <em>${r.p.bankrupt ? 'банкрот' : `${cells(r.i)} кл.`}</em><b>${r.p.bankrupt ? '—' : rub(r.nw)}</b></li>`).join('')}</ol>
       <p class="sub center">Богатство: деньги, клетки и дома, минус долги.</p>
+      ${statsHTML(rank)}
       ${NET.isClient() ? '<p class="sub center">Новую партию начнёт хост.</p>' : btn('Новая партия', 'newGame', 'primary big')}
       ${btn('Посмотреть поле', 'close', 'ghost')}`);
   }
@@ -1133,8 +1251,20 @@
   // how.remote — действие пришло с другого телефона (или сработал таймер)
   function applyAction(a, how) {
     const before = G.turn, actorBefore = E.actor(G);
+    const local = !netGame() && !(how && how.bot);
+    const label = local ? E.undoLabel(G, a) : null;
+    const wasTrade = G.offer && G.offer.kind === 'trade';
+    const copy = label || (local && a.type === 'offerTrade') ? JSON.stringify(G) : null;
     const r = E.act(G, a);
     if (!r.ok) return r;
+    if (!netGame()) {
+      if (a.type === 'offerTrade' && copy) tradeSnap = copy;
+      else if (a.type === 'accept' && label) { if (tradeSnap) undo.push({ g: tradeSnap, label, turn: G.turn }); tradeSnap = null; }
+      else if (label) undo.push({ g: copy, label, turn: G.turn });
+      else if (a.type === 'reject' && wasTrade) tradeSnap = null;   // отказ от обмена историю не трогает
+      else { undo = []; tradeSnap = null; }
+      if (G.phase === 'over' || undo.length > 30) undo = G.phase === 'over' ? [] : undo.slice(-30);
+    }
     save();
     const opts = { rolled: a.type === 'roll' || a.type === 'reroll', turnChanged: G.turn !== before };
     if (netGame()) NET.publish(opts);
@@ -1201,13 +1331,42 @@
       case 'showQr': showQr(); return;
       case 'botSpeed': botFast = !botFast; store.set('baai.botfast', botFast); showMenu(); return;
       case 'askNew':
-        openKind('ask', `<h3>Начать новую партию?</h3><p>Текущая партия будет удалена.</p>
+        openKind('ask', `<h3>Начать новую партию?</h3><p>${netGame() ? 'Текущая партия будет удалена.' : `Текущая партия останется в сохранённых${curSlot >= 0 && slots()[curSlot] ? ` («${esc(slots()[curSlot].name)}»)` : ''}.`}</p>
           ${btn('Да, новая партия', 'newGame', 'danger')}${btn('Отмена', 'close', 'ghost')}`);
         return;
       case 'newGame':
         clearTimeout(botT);
         if (netGame()) { G = null; closeSheet(); NET.backToLobby(); return; }
-        G = null; buildMode = false; buildHinted.clear(); hintsSeen.clear(); store.set(SAVE_KEY, null); showSetup(); return;
+        save();
+        G = null; curSlot = -1; undo = []; tradeSnap = null; buildMode = false; buildHinted.clear(); hintsSeen.clear(); showSetup(); return;
+
+      // сохранённые партии
+      case 'slotLoad': loadSlot(num('k')); return;
+      case 'slotNew': startGame(num('k')); return;
+      case 'slotRename': {
+        const x = slots()[num('k')]; if (!x) return;
+        openKind('ask', `<h3>Название партии</h3>
+          <input id="slot-name" class="slot-input" type="text" maxlength="24" value="${esc(x.name)}" aria-label="Название партии">
+          ${btn('Сохранить', 'slotRenameOk', 'primary', false, `data-k="${num('k')}"`)}${btn('Отмена', 'close', 'ghost')}`);
+        return;
+      }
+      case 'slotRenameOk': {
+        const m = slots(), k = num('k'), el = $('slot-name');
+        if (m[k] && el) { m[k].name = el.value.trim() || m[k].name; store.set(SLOTS_KEY, m); }
+        closeSheet(); renderSetup(); return;
+      }
+      case 'slotDel': {
+        const x = slots()[num('k')]; if (!x) return;
+        openKind('ask', `<h3>Удалить «${esc(x.name)}»?</h3><p>Партию нельзя будет продолжить.</p>
+          ${btn('Да, удалить', 'slotDelOk', 'danger', false, `data-k="${num('k')}"`)}${btn('Отмена', 'close', 'ghost')}`);
+        return;
+      }
+      case 'slotDelOk': {
+        const m = slots(), k = num('k');
+        m[k] = null; store.set(SLOTS_KEY, m); store.set(slotKey(k), null);
+        closeSheet(); renderSetup(); return;
+      }
+      case 'undo': doUndo(); return;
 
       // обмен
       case 'tradeOpen':
@@ -1293,8 +1452,8 @@
     $('btn-all').addEventListener('click', () => board && board.showAll());
     $('prize').addEventListener('click', () => showCell(20));
     $('rentbar').addEventListener('click', () => { clearTimeout(rentT); $('rentbar').hidden = true; });
-    $('btn-start').addEventListener('click', startGame);
-    $('btn-resume').addEventListener('click', () => { G = E.migrate(store.get(SAVE_KEY)); holder = null; if (G) { shownCard = G.card ? G.card.seq : 0; showGame(true); } });
+    $('btn-start').addEventListener('click', () => startGame());
+    migrateSave();
     $('count-seg').addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;
       readNames(); setup.count = Number(b.dataset.n); fixCounts('count'); renderSetup();
@@ -1344,11 +1503,11 @@
     if (NET.boot) NET.boot();
     if (NET.isClient()) return;
 
-    if (hot && hot.G) { G = E.migrate(hot.G); shownCard = G.card ? G.card.seq : 0; showGame(true); }
+    if (hot && hot.G) { G = E.migrate(hot.G); curSlot = hot.curSlot ?? -1; shownCard = G.card ? G.card.seq : 0; showGame(true); }
     else renderSetup();
   }
 
   const h = window.claude && window.claude.hot;
-  if (h && h.snapshot) h.snapshot(() => ({ G }));
+  if (h && h.snapshot) h.snapshot(() => ({ G, curSlot }));
   if (h && h.ready) h.ready(boot); else boot(h && h.data ? h.data : {});
 })();

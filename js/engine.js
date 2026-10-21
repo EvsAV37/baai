@@ -101,6 +101,7 @@
     s.auctionQueue = s.auctionQueue || [];
     s.offer = s.offer || null;
     s.choice = s.choice || null;
+    if (!s.stats) s.stats = newStats(s.players.length);
     s.players.forEach(p => {
       if (p.loan === undefined) p.loan = null;
       if (p.role === undefined) Object.assign(p, { role: null, roleUsed: false, roleShown: false, trap: false });
@@ -109,6 +110,30 @@
     for (const k in s.own) if (s.own[k].mortgaged === undefined) s.own[k].mortgaged = false;
     return s;
   }
+
+  // ---------- итоги партии ----------
+  // rentIn/rentOut — аренда получена/заплачена, tax — налоги, prize — Приз Ысыаха,
+  // bought/spent — куплено клеток и потрачено, auctions — из них на аукционе; cells — доход с клетки
+  function newStats(n) {
+    const one = () => ({ rentIn: 0, rentOut: 0, tax: 0, prize: 0, bought: 0, spent: 0, auctions: 0 });
+    return { players: Array.from({ length: n }, one), cells: {} };
+  }
+  // записать платёж в итоги: stat = { kind: 'rent', cell } | { kind: 'tax' }
+  function record(s, p, to, amount, stat) {
+    if (!stat || !s.stats) return;
+    const S = s.stats;
+    if (stat.kind === 'rent') {
+      S.players[p].rentOut += amount;
+      if (to >= 0) S.players[to].rentIn += amount;
+      S.cells[stat.cell] = (S.cells[stat.cell] || 0) + amount;
+    } else if (stat.kind === 'tax') S.players[p].tax += amount;
+  }
+  function gotCell(s, p, cost, auction) {
+    if (!s.stats) return;
+    const q = s.stats.players[p];
+    q.bought++; q.spent += cost; if (auction) q.auctions++;
+  }
+  function gotPrize(s, p, v) { if (s.stats) s.stats.players[p].prize += v; }
 
   // ---------- вспомогательное ----------
   const cur = s => s.players[s.turn];
@@ -322,19 +347,20 @@
   // ---------- деньги ----------
   // Заплатить: to — номер игрока, BANK, PRIZE или 'each' (поровну всем остальным).
   // prize — какая часть платежа банку уходит в Приз Ысыаха (проценты по кредиту)
-  function charge(s, p, to, amount, reason, after, prize) {
+  function charge(s, p, to, amount, reason, after, prize, stat) {
     const pl = s.players[p];
     if (amount <= 0) { if (after) runAfter(s, after); return; }
     if (pl.money < amount && p !== s.turn) autoRaise(s, p, amount);
     if (pl.money >= amount) {
       pay(s, p, to, amount, prize);
+      record(s, p, to, amount, stat);
       log(s, `${pl.name} платит ${rub(amount)} (${reason})`);
       if (after) runAfter(s, after);
       return;
     }
     if (p === s.turn) {
       // Свой ход — даём самому продать дома, заложить клетки или объявить банкротство
-      s.pending = { kind: 'debt', amount, to, reason, after: after || null, prize: prize || 0 };
+      s.pending = { kind: 'debt', amount, to, reason, after: after || null, prize: prize || 0, stat: stat || null };
       s.phase = 'debt';
       log(s, `${pl.name} не хватает денег: нужно ${rub(amount)} (${reason})`);
     } else {
@@ -458,23 +484,23 @@
         const why = rentWhy(s, i, opts);
         if (ow.trap && !ow.bankrupt) { ow.trap = false; rent *= 2; why.push('засада ×2'); reveal(s, o.owner, `засада — аренда вдвойне, ${rub(rent)}`); }
         s.rentNote = { seq: (s.rentNote ? s.rentNote.seq : 0) + 1, payer: p, owner: o.owner, cell: i, amount: rent, why };
-        charge(s, p, o.owner, rent, `аренда: ${c.name} → ${s.players[o.owner].name}`);
+        charge(s, p, o.owner, rent, `аренда: ${c.name} → ${s.players[o.owner].name}`, null, 0, { kind: 'rent', cell: i });
         return;
       }
       case 'tax':
         if (has(s, p, 'atyyhyt')) {
           const t = x15(taxOf(s, i));
           reveal(s, p, `налог в полтора раза больше, ${rub(t)}`);
-          charge(s, p, prizeOn(s) ? PRIZE : BANK, t, c.name);
+          charge(s, p, prizeOn(s) ? PRIZE : BANK, t, c.name, null, 0, { kind: 'tax' });
           return;
         }
-        if (prizeOn(s)) charge(s, p, PRIZE, taxOf(s, i), `${c.name} → в Приз Ысыаха`);
-        else charge(s, p, BANK, taxOf(s, i), c.name);
+        if (prizeOn(s)) charge(s, p, PRIZE, taxOf(s, i), `${c.name} → в Приз Ысыаха`, null, 0, { kind: 'tax' });
+        else charge(s, p, BANK, taxOf(s, i), c.name, null, 0, { kind: 'tax' });
         return;
       case 'parking':
         if (has(s, p, 'olonkhosut')) { pl.money += 100; reveal(s, p, `сказание на Ысыахе +${rub(100)}`); }
         if (prizeOn(s) && s.prize > 0) {
-          pl.money += s.prize;
+          pl.money += s.prize; gotPrize(s, p, s.prize);
           log(s, `🎉 ${pl.name} получает Приз Ысыаха: ${rub(s.prize)}`);
           s.prize = 0;
         }
@@ -654,7 +680,7 @@
       case 'olonkhosut': {
         if (!calm) return err('Только в начале или в конце хода');
         if (!prizeOn(s) || !s.prize) return err('Приз Ысыаха пуст');
-        const v = s.prize; s.prize = 0; pl.money += v;
+        const v = s.prize; s.prize = 0; pl.money += v; gotPrize(s, p, v);
         return done(`сказанием забирает Приз Ысыаха: ${rub(v)}`);
       }
     }
@@ -778,6 +804,7 @@
     if (A.leader !== null) {
       s.players[A.leader].money -= A.price;
       s.own[A.cell] = { owner: A.leader, houses: 0, mortgaged: false };
+      gotCell(s, A.leader, A.price, true);
       log(s, `🔨 ${s.players[A.leader].name} покупает ${c.name} на аукционе за ${rub(A.price)}`);
     } else {
       log(s, `🔨 ${c.name}: никто не купил, клетка остаётся у банка`);
@@ -937,6 +964,7 @@
         if (pl.money < cost) return err('Не хватает денег');
         pl.money -= cost;
         s.own[i] = { owner: p, houses: 0, mortgaged: false };
+        gotCell(s, p, cost, false);
         s.pending = null; s.phase = 'moving';
         log(s, `🏠 ${pl.name} покупает ${c.name} за ${rub(cost)}`);
         settle(s);
@@ -1104,6 +1132,7 @@
         if (pl.money < d.amount) return err('Всё ещё не хватает денег');
         s.pending = null; s.phase = 'moving';
         pay(s, p, d.to, d.amount, d.prize);
+        record(s, p, d.to, d.amount, d.stat);
         log(s, `${pl.name} платит ${rub(d.amount)} (${d.reason})`);
         if (d.after) runAfter(s, d.after);
         settle(s);
@@ -1125,6 +1154,31 @@
     return err('Неизвестное действие');
   }
 
+  // ---------- отмена (только на одном телефоне) ----------
+  // Что из действий можно отменить и как назвать в журнале; null — нельзя.
+  // Бросок, карточка, аукцион, кредит и передача хода не отменяются.
+  function undoLabel(s, a) {
+    const c = a.cell !== undefined ? BOARD[a.cell] : null;
+    switch (a.type) {
+      case 'buy': return s.pending && s.pending.cell !== undefined ? `покупка: ${BOARD[s.pending.cell].name}` : null;
+      case 'build': return c ? `стройка: ${c.name}` : null;
+      case 'sell': return c ? `продажа дома: ${c.name}` : null;
+      case 'mortgage': return c ? `залог: ${c.name}` : null;
+      case 'unmortgage': return c ? `выкуп: ${c.name}` : null;
+      case 'accept': return s.offer && s.offer.kind === 'trade' ? `обмен ${s.players[s.offer.from].name} и ${s.players[s.offer.to].name}` : null;
+    }
+    return null;
+  }
+
+  // Итоги партии для экрана победы
+  function summary(s) {
+    const S = s.stats || newStats(s.players.length);
+    let best = null;
+    for (const k in S.cells) if (!best || S.cells[k] > best.amount) best = { cell: Number(k), amount: S.cells[k] };
+    if (best) best.owner = s.own[best.cell] ? s.own[best.cell].owner : null;
+    return { players: S.players, best };
+  }
+
   const ok = () => ({ ok: true });
   const err = e => ({ ok: false, error: e });
 
@@ -1133,7 +1187,7 @@
     liquidValue, sellValue, mortgageValue, mortgageFee, unmortgageCost, canMortgage, canUnmortgage,
     canTradeCell, minBid, describeSide, rub, BANK, PRIZE,
     price, houseCost, taxOf, baseRent, up, normRules, RULE_DEFAULTS, GROW_EVERY,
-    canAbility, ROLE, ROLES,
+    canAbility, ROLE, ROLES, undoLabel, summary,
     setRandom(fn) { rand = fn; },
   };
   root.BAAI = root.BAAI || {};

@@ -414,6 +414,38 @@ body {
 .rank em { font-style: normal; color: var(--muted); font-size: 14px; }
 .rank b { font-variant-numeric: tabular-nums; }
 
+/* сохранённые партии */
+.slots { display: flex; flex-direction: column; gap: 8px; }
+.slot { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 12px; background: var(--snow); border: 1.5px solid var(--line); }
+.slot.over { opacity: .8; }
+.slot-figs { display: flex; gap: 2px; }
+.slot-figs svg { width: 26px; height: 26px; }
+.slot-tx { display: flex; flex-direction: column; min-width: 0; }
+.slot-tx b { font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slot-tx span { color: var(--muted); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slot-btns { display: flex; gap: 6px; align-items: center; }
+.slot-btns .btn.primary { flex: 1; }
+.slot-btns .btn.sm:not(.primary) { min-width: 44px; padding: 4px 8px; }
+.slot-pick { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.slot-choice { display: flex; flex-direction: column; align-items: flex-start; text-align: left; }
+.slot-choice span { color: var(--muted); font-size: 14px; font-weight: 400; }
+.slot-input { width: 100%; font: inherit; font-size: 18px; padding: 10px 12px; border: 2px solid var(--ink); border-radius: 10px; margin-bottom: 10px; box-sizing: border-box; }
+/* отмена */
+.btn.undo .u { font-size: 20px; margin-right: 4px; }
+
+/* итоги партии */
+.st-head { margin: 14px 0 6px; text-align: center; font-family: 'Alegreya SC', serif; font-size: 20px; }
+.best { display: flex; gap: 8px; align-items: center; margin: 0 0 8px; padding: 8px 10px; border-radius: 12px; background: #f6e9e6; font-size: 15px; }
+.best svg { width: 28px; height: 28px; flex: none; }
+.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.st-card { background: var(--snow); border-radius: 12px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.st-card > svg { width: 28px; height: 28px; }
+.st-nm { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 2px; }
+.st-row { display: flex; justify-content: space-between; gap: 6px; font-size: 13px; color: var(--muted); }
+.st-row b { color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.st-row.plus b { color: #2f6b3a; }
+.st-row.minus b { color: #9c3a30; }
+
 .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .toggles .btn[aria-pressed="false"] { color: var(--muted); border-style: dashed; }
 
