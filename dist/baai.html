@@ -2785,6 +2785,7 @@ body {
   const TOKEN_R = [116];                             // где стоит фишка перед клеткой, внутри круга
   const TOKEN_STEP = 20, TOKEN_MIN = 52;              // столбик: шаг между фишками и ближе к центру не заходим
   const TOK = 33;
+  const CORNER_BG = '#f1e8d4', CF = 0.6;            // CF — отступ рамки угла от стенок, градусов                       // береста: углы не похожи на цвета игроков
   const ICE = 0x1fa9f2;                              // ярко-голубой для снежинки залога
   const FONT = '"PT Sans Narrow", "Roboto Condensed", "Arial Narrow", sans-serif';
 
@@ -2808,7 +2809,7 @@ body {
 
   function cellFill(i) {
     const t = BOARD[i].type;
-    return { start: C.coral, jail: C.deep, parking: C.larch, gotojail: C.silver, tyusyulge: C.tyusyulge, bayanai: C.bayanai }[t] || C.paper;
+    return { start: CORNER_BG, jail: CORNER_BG, parking: CORNER_BG, gotojail: CORNER_BG, tyusyulge: C.tyusyulge, bayanai: C.bayanai }[t] || C.paper;
   }
 
   function cellIconName(i) {
@@ -2832,10 +2833,18 @@ body {
       const corner = i % 10 === 0;
       o.push(`<path d="${sectorPath(R.inn, R.out, a1, a2)}" fill="${cellFill(i)}"/>`);
       if (c.type === 'prop') o.push(`<path d="${sectorPath(R.band, R.out, a1, a2)}" fill="${T.GROUP[c.group]}"/>`);
+      if (corner) {
+        // угол: берестяной фон, тёмная рамка внутри и коралловые бусины вдоль внешнего края
+        o.push(`<path d="${sectorPath(R.inn + 5, R.out - 5, a1 + CF, a2 - CF)}" fill="none" stroke="${C.ink}" stroke-width="2"/>`);
+        for (let k = 0; k < 7; k++) {
+          const [bx, by] = polar(R.out - 13, a1 + 2.6 + k * (a2 - a1 - 5.2) / 6);
+          o.push(`<circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="2.3" fill="${C.coral}"/>`);
+        }
+      }
       // иконка: верх смотрит в центр — в приближении у фишки она стоит прямо
       const isz = corner ? 44 : 22;
       const [ix, iy] = polar(R.icon, a);
-      const icol = corner ? '#ffffff'
+      const icol = corner ? C.ink
         : c.type === 'prop' ? T.GROUP[c.group]
         : c.type === 'tyusyulge' ? C.coral
         : c.type === 'bayanai' ? C.larch : C.ink;
@@ -2851,10 +2860,44 @@ body {
     o.push(`<circle cx="${CX}" cy="${CY}" r="${R.center}" fill="${C.snow}"/>`);
 
     // Аал Луук Мас — дерево жизни, по центру круга
-    o.push(`<g transform="translate(${CX} ${CY + 6}) scale(0.56)">${T.treeSVG()}</g>`);
+    o.push(`<g transform="translate(${CX} ${CY})">${ornamentSVG()}</g>`);
     o.push('</svg>');
     return o.join('');
   }
+
+
+  // Медальон в центре: якутский орнамент кольцами — лировидные завитки, ромбы, сердцевидная розетка.
+  // Рисуется вокруг 0,0, радиус до ~110 (дальше стоят фишки).
+  function ornamentSVG() {
+    // Медальон в центре: якутский орнамент кольцами — лировидные завитки, ромбы, сердцевидная розетка.
+    // Рисуется вокруг 0,0, радиус до ~112 (дальше стоят фишки).
+    const o = [], ink = C.ink, coral = C.coral, sil = C.silver;
+    const rot = (k, n) => (k * 360 / n).toFixed(2);
+    o.push(`<circle r="112" fill="none" stroke="${sil}" stroke-width="1.5"/>`);
+    o.push(`<circle r="106" fill="none" stroke="${ink}" stroke-width="2"/>`);
+    // внешнее кольцо: 12 лир — ствол, две ветви расходятся и закручиваются внутрь; между ними бусины
+    const branch = m => `M0 -86C0 -94 ${-9 * m} -101 ${-15 * m} -97C${-20 * m} -94 ${-18 * m} -86 ${-12 * m} -86C${-8 * m} -86 ${-8 * m} -91 ${-11 * m} -91`;
+    const lyre = `<path d="M0 -76V-86${branch(1)}M0 -86${branch(-1).slice(6)}" fill="none" stroke="${ink}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><circle cy="-80" r="2" fill="${ink}"/>`;
+    for (let k = 0; k < 12; k++) {
+      o.push(`<g transform="rotate(${rot(k, 12)})">${lyre}</g>`);
+      o.push(`<g transform="rotate(${(k * 30 + 15).toFixed(2)})"><circle cy="-95" r="3.2" fill="${coral}"/></g>`);
+    }
+    // среднее кольцо: цепочка ромбов, тёмные чередуются с коралловыми
+    o.push(`<circle r="70" fill="none" stroke="${ink}" stroke-width="1.6"/>`);
+    o.push(`<circle r="54" fill="none" stroke="${ink}" stroke-width="1.6"/>`);
+    for (let k = 0; k < 16; k++) {
+      o.push(`<g transform="rotate(${rot(k, 16)})"><path d="M0 -69l6 7-6 7-6-7z" fill="${k % 2 ? coral : ink}"/></g>`);
+    }
+    // розетка: восемь сердцевидных лепестков с бусиной, в середине коралловое кольцо
+    const heart = `<path d="M0 -12C-2.3 -20 -9.3 -26 -11.6 -36C-13.3 -45 -7 -50 0 -40C7 -50 13.3 -45 11.6 -36C9.3 -26 2.3 -20 0 -12Z" fill="none" stroke="${ink}" stroke-width="2.6" stroke-linejoin="round"/><circle cy="-31" r="2.4" fill="${coral}"/>`;
+    for (let k = 0; k < 8; k++) o.push(`<g transform="rotate(${rot(k, 8)})">${heart}</g>`);
+    o.push(`<circle r="9" fill="${coral}"/><circle r="3.6" fill="${C.snow}"/>`);
+    return o.join('');
+  }
+
+
+
+
 
   function svgTexture(scene, key, svg) {
     return new Promise(resolve => {
@@ -2936,11 +2979,11 @@ body {
           const [main, sub] = CORNER[i];
           const low = Math.sin(rad(a)) >= -0.01;
           const rot = low ? a - 90 : a + 90;
-          const rm = low ? 214 : 250, rs = low ? 246 : 218;
+          const rm = low ? 228 : 258, rs = low ? 256 : 230;
           const [mx, my] = polar(rm, a), [sx, sy] = polar(rs, a);
-          txt(mx, my, main, 18, rot, '#ffffff', true, chord(rm, SC) - 10);
-          const st = txt(sx, sy, sub, 12.5, rot, '#ffffff', false, chord(rs, SC) - 10);
-          if (i === 20) { this.prizeLabel = st; this.prizeFit = chord(rs, SC) - 10; }
+          txt(mx, my, main, 18, rot, C.ink, true, chord(rm, SC - 0.7 - 2 * CF) - 12);
+          const st = txt(sx, sy, sub, 12.5, rot, C.coral, true, chord(rs, SC - 0.7 - 2 * CF) - 12);
+          if (i === 20) { this.prizeLabel = st; this.prizeFit = chord(rs, SC - 0.7 - 2 * CF) - 12; }
         }
       }
     }
